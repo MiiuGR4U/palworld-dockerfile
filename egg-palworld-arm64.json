@@ -114,7 +114,7 @@
             "name": "Auto-Broadcast Messages",
             "description": "In-game announcement messages, separated by semicolons (;).",
             "env_variable": "ANNOUNCE_MESSAGES",
-            "default_value": "💬 Entre no nosso Discord!;⚡ Servidor rodando em ARM64 com FEX-Emu;⚔️ Bom jogo a todos!",
+            "default_value": "🎮 Bem-vindos ao servidor! Divirtam-se e boa jogatina!;💾 O progresso do servidor é salvo automaticamente a cada 15 minutos.;⚔️ Lembrem-se de organizar os Pals e cuidar da base!;💬 Qualquer dúvida ou erro no servidor, mandem mensagem no grupo!",
             "user_viewable": true,
             "user_editable": true,
             "rules": "nullable|string",

@@ -32,7 +32,7 @@ AUTOSAVE_NOTIFY = os.getenv("AUTOSAVE_NOTIFY_INGAME", "true").lower() == "true"
 ANNOUNCE_INTERVAL = int(os.getenv("ANNOUNCE_INTERVAL_MINUTES", "10"))
 ANNOUNCE_MESSAGES_RAW = os.getenv(
     "ANNOUNCE_MESSAGES",
-    "💬 Entre no nosso Discord!;⚡ Servidor rodando em ARM64 com FEX-Emu;⚔️ Bom jogo a todos!"
+    "🎮 Bem-vindos ao servidor! Divirtam-se e boa jogatina!;💾 O progresso do servidor é salvo automaticamente a cada 15 minutos.;⚔️ Lembrem-se de organizar os Pals e cuidar da base!;💬 Qualquer dúvida ou erro no servidor, mandem mensagem no grupo!"
 )
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
