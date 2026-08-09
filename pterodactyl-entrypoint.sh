@@ -8,11 +8,14 @@ set -Eeuo pipefail
 # ------------------------------------------------------------------------------
 # Configurable UI & Logging Customizations
 # ------------------------------------------------------------------------------
+CONSOLE_LANG="${CONSOLE_LANG:-pt}"
 BANNER_TITLE="${BANNER_TITLE:-Palworld ARM64 - Pterodactyl}"
-STARTUP_MESSAGE="${STARTUP_MESSAGE:-Starting Supersunho Palworld Server Manager...}"
+STARTUP_MESSAGE="${STARTUP_MESSAGE:-Iniciando Gerenciador Palworld Server...}"
 PREFLIGHT_TEST_MSG="${PREFLIGHT_TEST_MSG:-FEX guest bootstrap OK}"
 ENABLE_COLOR_LOGS="${ENABLE_COLOR_LOGS:-true}"
 QUIET_MONITORING="${QUIET_MONITORING:-true}"
+
+export CONSOLE_LANG ENABLE_COLOR_LOGS QUIET_MONITORING
 
 # ANSI Colors (only applied if ENABLE_COLOR_LOGS=true)
 if [[ "${ENABLE_COLOR_LOGS}" == "true" ]]; then
@@ -37,8 +40,8 @@ fi
 
 log_info()    { echo -e "${C_CYAN}[INFO]${C_RESET} $*"; }
 log_success() { echo -e "${C_GREEN}[✔ OK]${C_RESET}  $*"; }
-log_warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET}  $*"; }
-log_fatal()   { echo -e "${C_RED}[FATAL]${C_RESET} $*"; }
+log_warn()    { echo -e "${C_YELLOW}[AVISO]${C_RESET} $*"; }
+log_fatal()   { echo -e "${C_RED}[ERRO]${C_RESET}  $*"; }
 
 log_section() {
     echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
@@ -59,7 +62,7 @@ esac
 validate_architecture() {
     ARCH="$(uname -m)"
     if [[ "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]]; then
-        log_fatal "Unsupported architecture: '${ARCH}'. This image requires ARM64/aarch64 node."
+        log_fatal "Arquitetura não suportada: '${ARCH}'. Esta imagem requer um nó ARM64/aarch64."
         exit 20
     fi
 }
@@ -68,7 +71,7 @@ validate_architecture() {
 # 2. Writable Storage Directory Setup
 # ------------------------------------------------------------------------------
 prepare_directories() {
-    log_info "Verifying Pterodactyl volume structure under /home/container..."
+    log_info "Verificando estrutura de armazenamento em /home/container..."
     mkdir -p \
         /home/container/backups \
         /home/container/logs/palworld \
@@ -88,13 +91,13 @@ prepare_directories() {
 # ------------------------------------------------------------------------------
 seed_steamcmd() {
     if [[ ! -x /home/container/.steamcmd/steamcmd.sh ]]; then
-        log_info "Seeding writable SteamCMD environment..."
+        log_info "Inicializando ambiente gravável do SteamCMD..."
         if [[ -d /opt/steamcmd-seed ]]; then
             cp -a /opt/steamcmd-seed/. /home/container/.steamcmd/
             chmod 0755 /home/container/.steamcmd/steamcmd.sh
-            log_success "SteamCMD seeded successfully."
+            log_success "SteamCMD inicializado com sucesso."
         else
-            log_fatal "SteamCMD seed directory /opt/steamcmd-seed missing from image!"
+            log_fatal "Diretório de seed do SteamCMD /opt/steamcmd-seed não encontrado!"
             exit 22
         fi
     fi
@@ -120,7 +123,7 @@ configure_environment() {
     ROOTFS_DIR="$(find /opt/fex-rootfs -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
 
     if [[ -z "${ROOTFS_DIR}" || ! -d "${ROOTFS_DIR}" ]]; then
-        log_fatal "No preinstalled FEX RootFS found under /opt/fex-rootfs."
+        log_fatal "Nenhum FEX RootFS pré-instalado encontrado em /opt/fex-rootfs."
         exit 21
     fi
 
@@ -148,7 +151,7 @@ configure_ports() {
     GAME_PORT="${SERVER_PORT:-8211}"
 
     if ! [[ "${GAME_PORT}" =~ ^[0-9]+$ ]] || (( GAME_PORT < 1 || GAME_PORT > 65535 )); then
-        log_fatal "Invalid Pterodactyl primary allocation SERVER_PORT='${GAME_PORT}'."
+        log_fatal "Porta primária Pterodactyl inválida SERVER_PORT='${GAME_PORT}'."
         exit 25
     fi
 
@@ -166,13 +169,14 @@ print_banner() {
     echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
     echo -e "${C_CYAN}│${C_RESET} ${C_BOLD}${C_MAGENTA}${BANNER_TITLE}${C_RESET}"
     echo -e "${C_CYAN}├────────────────────────────────────────────────────────────┤${C_RESET}"
-    echo -e "${C_CYAN}│${C_RESET}  🎮 ${C_BOLD}Server Name${C_RESET}  : ${SERVER_NAME:-Palworld ARM64 Server}"
-    echo -e "${C_CYAN}│${C_RESET}  ⚡ ${C_BOLD}Architecture${C_RESET} : $(uname -m) (UID $(id -u):$(id -g))"
-    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Game Port${C_RESET}   : ${GAME_PORT}/UDP (Primary Allocation)"
-    echo -e "${C_CYAN}│${C_RESET}  🔍 ${C_BOLD}Query Port${C_RESET}  : ${QUERY_PORT:-27018}/UDP (Extra Allocation)"
-    echo -e "${C_CYAN}│${C_RESET}  🛡️ ${C_BOLD}FEX RootFS${C_RESET}   : ${FEX_ROOTFS}"
-    echo -e "${C_CYAN}│${C_RESET}  🔒 ${C_BOLD}Steam Auth${C_RESET}   : ${USE_AUTH:-false} (Disabled for ARM64/FEX)"
-    echo -e "${C_CYAN}│${C_RESET}  🧹 ${C_BOLD}Quiet Logs${C_RESET}   : ${QUIET_MONITORING:-true} (Anti-Spam Active)"
+    echo -e "${C_CYAN}│${C_RESET}  🎮 ${C_BOLD}Servidor${C_RESET}    : ${SERVER_NAME:-Palworld ARM64 Server}"
+    echo -e "${C_CYAN}│${C_RESET}  ⚡ ${C_BOLD}Arquitetura${C_RESET} : $(uname -m) (UID $(id -u):$(id -g))"
+    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Porta Jogo${C_RESET}  : ${GAME_PORT}/UDP (Alocação Primária)"
+    echo -e "${C_CYAN}│${C_RESET}  🔍 ${C_BOLD}Porta Query${C_RESET} : ${QUERY_PORT:-27018}/UDP (Alocação Extra)"
+    echo -e "${C_CYAN}│${C_RESET}  🛡️ ${C_BOLD}FEX RootFS${C_RESET}  : ${FEX_ROOTFS}"
+    echo -e "${C_CYAN}│${C_RESET}  🔒 ${C_BOLD}Steam Auth${C_RESET}  : ${USE_AUTH:-false} (Desativado para ARM64/FEX)"
+    echo -e "${C_CYAN}│${C_RESET}  🧹 ${C_BOLD}Anti-Spam${C_RESET}   : ${QUIET_MONITORING:-true} (Filtro Inteligente)"
+    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Idioma${C_RESET}      : ${CONSOLE_LANG:-pt} (Tradução Ativa)"
     echo -e "${C_CYAN}╰────────────────────────────────────────────────────────────╯${C_RESET}\n"
 }
 
@@ -181,22 +185,22 @@ print_banner() {
 # ------------------------------------------------------------------------------
 preflight_fex() {
     command -v FEXBash >/dev/null 2>&1 || {
-        log_fatal "FEXBash binary missing from image."
+        log_fatal "Binário FEXBash não encontrado na imagem."
         exit 24
     }
 
-    log_info "Executing FEX guest preflight test..."
+    log_info "Executando teste de preflight da emulação FEX..."
     if FEXBash -c "printf '%s\\n' '${PREFLIGHT_TEST_MSG}'" >/dev/null 2>&1; then
-        log_success "FEX guest preflight test passed."
+        log_success "Teste de preflight FEX concluído com sucesso."
     else
         rc=$?
-        log_fatal "FEX guest preflight test failed with exit code ${rc}."
+        log_fatal "Teste de preflight FEX falhou com código de saída ${rc}."
         exit "${rc}"
     fi
 }
 
 # ------------------------------------------------------------------------------
-# 8. Start Manager with Optional Anti-Spam Stream Filtering
+# 8. Start Manager with Anti-Spam & Translation Filter
 # ------------------------------------------------------------------------------
 start_manager() {
     log_info "${STARTUP_MESSAGE}"
@@ -208,7 +212,7 @@ start_manager() {
     fi
 
     if [[ "${QUIET_MONITORING}" == "true" && -f "${FILTER_SCRIPT}" ]]; then
-        log_info "Anti-spam log filter enabled."
+        log_info "Filtro interativo de logs ativado."
         exec python -u -m src.server_manager 2>&1 | python -u "${FILTER_SCRIPT}"
     else
         exec python -m src.server_manager
@@ -238,7 +242,7 @@ main() {
             exec /bin/bash
             ;;
         *)
-            log_info "Custom startup command: '$*'"
+            log_info "Comando customizado: '$*'"
             cd /app
             exec python -m src.server_manager "$@"
             ;;

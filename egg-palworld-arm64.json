@@ -71,6 +71,16 @@
             "field_type": "text"
         },
         {
+            "name": "Console Language / Idioma do Console",
+            "description": "Language for console logs and status indicators. Options: pt (Português), en (English), raw (Unfiltered technical logs).",
+            "env_variable": "CONSOLE_LANG",
+            "default_value": "pt",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:pt,en,raw",
+            "field_type": "text"
+        },
+        {
             "name": "Server Name",
             "description": "Name displayed in the Palworld server browser.",
             "env_variable": "SERVER_NAME",
