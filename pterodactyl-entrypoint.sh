@@ -216,9 +216,19 @@ start_manager() {
         HELPER_SCRIPT="$(pwd)/scripts/palworld_helper.py"
     fi
 
+    # Optional Preservation of user-edited PalWorldSettings.ini
+    PRESERVE_CUSTOM_SETTINGS="${PRESERVE_CUSTOM_SETTINGS:-true}"
+    INI_PATH="/home/container/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"
+    BAK_PATH="/home/container/tmp/PalWorldSettings.ini.userbak"
+
+    if [[ "${PRESERVE_CUSTOM_SETTINGS}" == "true" && -f "${INI_PATH}" ]]; then
+        log_info "Criando backup temporário de PalWorldSettings.ini personalizado..."
+        cp -a "${INI_PATH}" "${BAK_PATH}"
+    fi
+
     # Launch Helper Suite in background if available
     if [[ -f "${HELPER_SCRIPT}" ]]; then
-        log_info "Iniciando Palworld Helper Suite (Auto-Save, Broadcast, Discord)..."
+        log_info "Iniciando Palworld Helper Suite (Auto-Save, Broadcast, Discord, INI Guard)..."
         python -u "${HELPER_SCRIPT}" >/dev/null 2>&1 &
     fi
 

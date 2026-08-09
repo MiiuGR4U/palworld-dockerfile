@@ -37,8 +37,30 @@ ANNOUNCE_MESSAGES_RAW = os.getenv(
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 DISCORD_NOTIFY_PLAYERS = os.getenv("DISCORD_NOTIFY_PLAYERS", "true").lower() == "true"
+PRESERVE_CUSTOM_SETTINGS = os.getenv("PRESERVE_CUSTOM_SETTINGS", "true").lower() == "true"
 
 BASE_URL = f"http://{REST_HOST}:{REST_PORT}/v1/api"
+
+def preserve_user_ini():
+    if not PRESERVE_CUSTOM_SETTINGS:
+        return
+
+    ini_path = "/home/container/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"
+    bak_path = "/home/container/tmp/PalWorldSettings.ini.userbak"
+
+    if os.path.exists(bak_path):
+        try:
+            # Small sleep to let manager write initial defaults
+            time.sleep(2)
+            with open(bak_path, "r", encoding="utf-8", errors="ignore") as f_bak:
+                custom_content = f_bak.read()
+
+            if custom_content.strip():
+                with open(ini_path, "w", encoding="utf-8") as f_ini:
+                    f_ini.write(custom_content)
+                print("[HELPER] 🛡️ [CONFIG] Edições manuais do arquivo PalWorldSettings.ini preservadas com sucesso!", flush=True)
+        except Exception as e:
+            print(f"[HELPER] ⚠️ Não foi possível restaurar PalWorldSettings.ini: {e}", flush=True)
 
 def get_auth_header() -> dict:
     auth_str = f"admin:{ADMIN_PASSWORD}"
@@ -172,6 +194,9 @@ def shutdown_handler(signum, frame):
     sys.exit(0)
 
 def main():
+    # Preserve custom PalWorldSettings.ini edits
+    preserve_user_ini()
+
     # Register signal handlers for graceful stop
     signal.signal(signal.SIGTERM, shutdown_handler)
     signal.signal(signal.SIGINT, shutdown_handler)

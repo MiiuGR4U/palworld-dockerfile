@@ -131,6 +131,16 @@
             "field_type": "text"
         },
         {
+            "name": "Preserve Custom INI Settings",
+            "description": "Protects manual edits made directly to PalWorldSettings.ini so they are not overwritten by container restarts.",
+            "env_variable": "PRESERVE_CUSTOM_SETTINGS",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
             "name": "Discord Player Notifications",
             "description": "Send Discord Webhook notifications when players connect or disconnect.",
             "env_variable": "DISCORD_NOTIFY_PLAYERS",
