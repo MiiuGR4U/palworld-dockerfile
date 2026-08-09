@@ -61,6 +61,16 @@
             "field_type": "text"
         },
         {
+            "name": "Quiet Monitoring (Anti-Spam Logs)",
+            "description": "Suppresses 10-second REST polling spam and Sentry cURL debug headers while keeping player join/leave, server status, warnings, and errors fully visible.",
+            "env_variable": "QUIET_MONITORING",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
             "name": "Server Name",
             "description": "Name displayed in the Palworld server browser.",
             "env_variable": "SERVER_NAME",

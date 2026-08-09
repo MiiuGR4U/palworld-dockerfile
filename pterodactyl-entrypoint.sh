@@ -1,19 +1,20 @@
 #!/bin/bash
 # ==============================================================================
 # Palworld ARM64 — Pterodactyl / Hydrodactyl Entrypoint Script
-# High-resilience, modular, non-root runtime bootstrap for ARM64/FEX-Emu
+# High-resilience, modular, non-root runtime bootstrap with anti-spam UI
 # ==============================================================================
 set -Eeuo pipefail
 
 # ------------------------------------------------------------------------------
 # Configurable UI & Logging Customizations
 # ------------------------------------------------------------------------------
-BANNER_TITLE="${BANNER_TITLE:-PALWORLD DEDICATED SERVER (ARM64)}"
+BANNER_TITLE="${BANNER_TITLE:-Palworld ARM64 - Pterodactyl}"
 STARTUP_MESSAGE="${STARTUP_MESSAGE:-Starting Supersunho Palworld Server Manager...}"
 PREFLIGHT_TEST_MSG="${PREFLIGHT_TEST_MSG:-FEX guest bootstrap OK}"
 ENABLE_COLOR_LOGS="${ENABLE_COLOR_LOGS:-true}"
+QUIET_MONITORING="${QUIET_MONITORING:-true}"
 
-# ANSI Colors (only applied if terminal supports or ENABLE_COLOR_LOGS=true)
+# ANSI Colors (only applied if ENABLE_COLOR_LOGS=true)
 if [[ "${ENABLE_COLOR_LOGS}" == "true" ]]; then
     C_RESET='\033[0m'
     C_BOLD='\033[1m'
@@ -22,6 +23,7 @@ if [[ "${ENABLE_COLOR_LOGS}" == "true" ]]; then
     C_YELLOW='\033[33m'
     C_RED='\033[31m'
     C_CYAN='\033[36m'
+    C_MAGENTA='\033[35m'
 else
     C_RESET=''
     C_BOLD=''
@@ -30,17 +32,18 @@ else
     C_YELLOW=''
     C_RED=''
     C_CYAN=''
+    C_MAGENTA=''
 fi
 
 log_info()    { echo -e "${C_CYAN}[INFO]${C_RESET} $*"; }
-log_success() { echo -e "${C_GREEN}[OK]${C_RESET}   $*"; }
+log_success() { echo -e "${C_GREEN}[✔ OK]${C_RESET}  $*"; }
 log_warn()    { echo -e "${C_YELLOW}[WARN]${C_RESET}  $*"; }
 log_fatal()   { echo -e "${C_RED}[FATAL]${C_RESET} $*"; }
 
 log_section() {
-    echo -e "${C_BLUE}${C_BOLD}============================================================${C_RESET}"
-    echo -e "${C_BLUE}${C_BOLD}  $1${C_RESET}"
-    echo -e "${C_BLUE}${C_BOLD}============================================================${C_RESET}"
+    echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
+    echo -e "${C_CYAN}│${C_RESET}  ${C_BOLD}${C_MAGENTA}$1${C_RESET}"
+    echo -e "${C_CYAN}╰────────────────────────────────────────────────────────────╯${C_RESET}"
 }
 
 # Pterodactyl installer passthrough.
@@ -129,7 +132,7 @@ configure_environment() {
     # Write fallback config file
     printf '{"Config":{"RootFS":"%s"}}\n' "${ROOTFS_DIR}" > /home/container/.fex-emu/Config.json
 
-    # ARM64 JIT Optimization Defaults (Configurable via ENV)
+    # ARM64 JIT Optimization Defaults
     export FEX_ENABLE_JIT_CACHE="${FEX_ENABLE_JIT_CACHE:-1}"
     export FEX_JIT_CACHE_SIZE="${FEX_JIT_CACHE_SIZE:-1024}"
     export FEX_ENABLE_VIXL_SIMULATOR="${FEX_ENABLE_VIXL_SIMULATOR:-0}"
@@ -157,19 +160,20 @@ configure_ports() {
 }
 
 # ------------------------------------------------------------------------------
-# 6. Observability Banner
+# 6. High-Aesthetics Unicode Console Banner
 # ------------------------------------------------------------------------------
 print_banner() {
-    log_section "${BANNER_TITLE}"
-    echo -e "  Architecture : ${C_BOLD}$(uname -m)${C_RESET}"
-    echo -e "  UID:GID      : ${C_BOLD}$(id -u):$(id -g)${C_RESET}"
-    echo -e "  Server Dir   : ${C_BOLD}${SERVER_DIR}${C_RESET}"
-    echo -e "  Game Port    : ${C_BOLD}${GAME_PORT}/UDP (Primary Allocation)${C_RESET}"
-    echo -e "  Query Port   : ${C_BOLD}${QUERY_PORT:-27018}/UDP (Extra Allocation Required)${C_RESET}"
-    echo -e "  FEX RootFS   : ${C_BOLD}${FEX_ROOTFS}${C_RESET}"
-    echo -e "  Steam Auth   : ${C_BOLD}${USE_AUTH:-false}${C_RESET}"
-    echo -e "  Auto Update  : ${C_BOLD}${UPDATE_ON_START:-true}${C_RESET}"
-    echo -e "${C_BLUE}============================================================${C_RESET}\n"
+    echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
+    echo -e "${C_CYAN}│${C_RESET} ${C_BOLD}${C_MAGENTA}${BANNER_TITLE}${C_RESET}"
+    echo -e "${C_CYAN}├────────────────────────────────────────────────────────────┤${C_RESET}"
+    echo -e "${C_CYAN}│${C_RESET}  🎮 ${C_BOLD}Server Name${C_RESET}  : ${SERVER_NAME:-Palworld ARM64 Server}"
+    echo -e "${C_CYAN}│${C_RESET}  ⚡ ${C_BOLD}Architecture${C_RESET} : $(uname -m) (UID $(id -u):$(id -g))"
+    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Game Port${C_RESET}   : ${GAME_PORT}/UDP (Primary Allocation)"
+    echo -e "${C_CYAN}│${C_RESET}  🔍 ${C_BOLD}Query Port${C_RESET}  : ${QUERY_PORT:-27018}/UDP (Extra Allocation)"
+    echo -e "${C_CYAN}│${C_RESET}  🛡️ ${C_BOLD}FEX RootFS${C_RESET}   : ${FEX_ROOTFS}"
+    echo -e "${C_CYAN}│${C_RESET}  🔒 ${C_BOLD}Steam Auth${C_RESET}   : ${USE_AUTH:-false} (Disabled for ARM64/FEX)"
+    echo -e "${C_CYAN}│${C_RESET}  🧹 ${C_BOLD}Quiet Logs${C_RESET}   : ${QUIET_MONITORING:-true} (Anti-Spam Active)"
+    echo -e "${C_CYAN}╰────────────────────────────────────────────────────────────╯${C_RESET}\n"
 }
 
 # ------------------------------------------------------------------------------
@@ -192,6 +196,26 @@ preflight_fex() {
 }
 
 # ------------------------------------------------------------------------------
+# 8. Start Manager with Optional Anti-Spam Stream Filtering
+# ------------------------------------------------------------------------------
+start_manager() {
+    log_info "${STARTUP_MESSAGE}"
+    cd /app
+
+    FILTER_SCRIPT="/scripts/log_filter.py"
+    if [[ ! -f "${FILTER_SCRIPT}" ]]; then
+        FILTER_SCRIPT="$(pwd)/scripts/log_filter.py"
+    fi
+
+    if [[ "${QUIET_MONITORING}" == "true" && -f "${FILTER_SCRIPT}" ]]; then
+        log_info "Anti-spam log filter enabled."
+        exec python -u -m src.server_manager 2>&1 | python -u "${FILTER_SCRIPT}"
+    else
+        exec python -m src.server_manager
+    fi
+}
+
+# ------------------------------------------------------------------------------
 # Main Dispatcher
 # ------------------------------------------------------------------------------
 main() {
@@ -205,9 +229,7 @@ main() {
 
     case "${1:---start-server}" in
         --start-server|"")
-            log_info "${STARTUP_MESSAGE}"
-            cd /app
-            exec python -m src.server_manager
+            start_manager
             ;;
         --health-check)
             exec python /usr/local/bin/healthcheck

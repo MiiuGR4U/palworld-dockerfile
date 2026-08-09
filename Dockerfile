@@ -33,6 +33,7 @@ USER root
 COPY --from=tools /out/depotdownloader /opt/depotdownloader
 COPY --from=tools /out/steamcmd /opt/steamcmd-seed
 COPY --chmod=0755 pterodactyl-entrypoint.sh /pterodactyl-entrypoint.sh
+COPY --chmod=0755 scripts/log_filter.py /scripts/log_filter.py
 
 # Writable directory environment specifications for Pterodactyl volume
 ENV SERVER_DIR=/home/container \
