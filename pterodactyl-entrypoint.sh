@@ -93,6 +93,33 @@ echo "[PTERO-ARM64] STEAMCMD_DIR=${STEAMCMD_DIR}"
 echo "[PTERO-ARM64] FEX_ROOTFS=${FEX_ROOTFS}"
 echo "[PTERO-ARM64] FEX_APP_CONFIG_LOCATION=${FEX_APP_CONFIG_LOCATION}"
 
+# ------------------------------------------------------------
+# Pterodactyl primary allocation -> Palworld game port
+# ------------------------------------------------------------
+# SERVER_PORT is injected automatically by Pterodactyl/Wings and is reserved,
+# so it must NOT be declared as an EggVariable.
+GAME_PORT="${SERVER_PORT:-8211}"
+
+if ! [[ "${GAME_PORT}" =~ ^[0-9]+$ ]] || (( GAME_PORT < 1 || GAME_PORT > 65535 )); then
+    echo "[FATAL] Invalid Pterodactyl primary allocation SERVER_PORT='${GAME_PORT}'."
+    exit 25
+fi
+
+# PublicPort is metadata for community/public lobby. Keep it in sync with the
+# actual primary allocation so there is never a second manually-maintained port.
+export PUBLIC_PORT="${GAME_PORT}"
+
+# Supersunho's ProcessManager currently adds query/startup options but does not
+# add -port=. Additional options are appended LAST, so force the actual Palworld
+# listen port through that mechanism while preserving user custom options.
+USER_ADDITIONAL_OPTIONS="${ADDITIONAL_SERVER_OPTIONS:-}"
+export ADDITIONAL_SERVER_OPTIONS="${USER_ADDITIONAL_OPTIONS} -port=${GAME_PORT}"
+
+echo "[PTERO-ARM64] Primary game allocation: ${SERVER_IP:-0.0.0.0}:${GAME_PORT}/UDP"
+echo "[PTERO-ARM64] Palworld listen argument: -port=${GAME_PORT}"
+echo "[PTERO-ARM64] PublicPort synchronized: ${PUBLIC_PORT}"
+echo "[PTERO-ARM64] Query port: ${QUERY_PORT:-27018}/UDP (extra allocation recommended for browser/query)"
+
 [[ -x /home/container/.steamcmd/steamcmd.sh ]] || {
     echo "[FATAL] Writable SteamCMD bootstrap is missing."
     exit 22
