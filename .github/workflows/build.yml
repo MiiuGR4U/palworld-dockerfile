@@ -3,7 +3,7 @@ name: Build ARM64 Pterodactyl Image
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [ main, dev ]
     paths:
       - Dockerfile
       - pterodactyl-entrypoint.sh
@@ -17,34 +17,51 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Login to GHCR
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve lowercase image name
+      - name: Determine Branch Image Tags
         shell: bash
         run: |
           OWNER="${GITHUB_REPOSITORY_OWNER,,}"
-          echo "IMAGE=ghcr.io/${OWNER}/palworld-arm64-pterodactyl" >> "$GITHUB_ENV"
+          IMAGE="ghcr.io/${OWNER}/palworld-arm64-pterodactyl"
+          REF_NAME="${GITHUB_REF_NAME}"
 
-      - name: Build and push
+          echo "IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+
+          if [ "${REF_NAME}" = "main" ]; then
+            echo "TAG_PRIMARY=${IMAGE}:latest" >> "$GITHUB_ENV"
+            echo "TAG_SHA=${IMAGE}:${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          elif [ "${REF_NAME}" = "dev" ]; then
+            echo "TAG_PRIMARY=${IMAGE}:dev" >> "$GITHUB_ENV"
+            echo "TAG_SHA=${IMAGE}:dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          else
+            echo "TAG_PRIMARY=${IMAGE}:${REF_NAME}" >> "$GITHUB_ENV"
+            echo "TAG_SHA=${IMAGE}:${REF_NAME}-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and Push Docker Image (ARM64)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           platforms: linux/arm64
           tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.TAG_PRIMARY }}
+            ${{ env.TAG_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
