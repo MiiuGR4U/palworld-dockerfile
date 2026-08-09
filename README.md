@@ -1,99 +1,112 @@
-# Palworld ARM64 para Pterodactyl / Hydrodactyl
+# PATCH v2 — Palworld ARM64 / Pterodactyl
 
-## Recomendado: build pelo GitHub Actions
+## O erro corrigido
 
-1. Crie um repositório novo, por exemplo `palworld-arm64-pterodactyl`.
-2. Envie TODO o conteúdo deste ZIP para a raiz do repositório.
-3. Faça push na branch `main`.
-4. Abra `Actions` e aguarde `Build ARM64 Pterodactyl Image`.
-5. A imagem ficará em:
-
-   `ghcr.io/SEU_USUARIO_EM_MINUSCULO/palworld-arm64-pterodactyl:latest`
-
-6. No GitHub, abra o Package criado e mude a visibilidade para **Public**.
-7. Abra `egg-palworld-arm64-custom-image.json`.
-8. Substitua AS DUAS ocorrências de:
-
-   `ghcr.io/your-github-user/palworld-arm64-pterodactyl:latest`
-
-   pela sua imagem real.
-
-9. Importe o egg no Hydrodactyl.
-10. Crie/recrie o servidor e clique em **Reinstall**.
-
-## Build manual na VPS ARM64
-
-Login no GHCR:
+A v1 ainda executava o entrypoint original do Supersunho:
 
 ```bash
-echo "SEU_GITHUB_PAT" | docker login ghcr.io -u SEU_USUARIO --password-stdin
+exec /entrypoint-upstream.sh "$@"
 ```
 
-Build:
+O entrypoint original SEMPRE chama `setup_permissions()` e essa função possui
+`/home/steam/...` hardcoded.
+
+No Wings o runtime é não-root, então isso termina em:
+
+```text
+mkdir: cannot create directory '/home/steam': Permission denied
+```
+
+## O que a v2 faz
+
+A v2 NÃO executa mais o entrypoint original.
+
+Ela usa diretamente:
 
 ```bash
-docker build \
-  --platform linux/arm64 \
-  -t ghcr.io/seu_usuario/palworld-arm64-pterodactyl:latest \
-  .
+cd /app
+exec python -m src.server_manager
 ```
 
-Push:
-
-```bash
-docker push ghcr.io/seu_usuario/palworld-arm64-pterodactyl:latest
-```
-
-Depois deixe o Package público e altere o JSON do egg.
-
-## O que esta imagem corrige
-
-O upstream Supersunho assume `/home/steam`, mas Wings roda o processo sem root.
-
-Na imagem customizada:
-
-- `/home/steam/palworld_server` -> `/home/container`
-- `/home/steam/backups` -> `/home/container/backups`
-- `/home/steam/logs` -> `/home/container/logs`
-- `/home/steam/steamcmd` -> `/home/container/.steamcmd`
-- `/home/steam/Steam` -> `/home/container/Steam`
-
-O wrapper cria os destinos graváveis ANTES do entrypoint original rodar.
-
-O FEX, RootFS Ubuntu x86_64 e manager continuam sendo os do Supersunho.
-
-## Installer
-
-O installer não executa `apt` ou `dpkg`.
-
-DepotDownloader ARM64 e o bootstrap do SteamCMD já estão dentro da imagem.
-
-Fluxo esperado:
+O próprio manager do Supersunho usa os paths configuráveis:
 
 ```text
-[1/5] Checking ARM64 environment
-[2/5] Preparing Pterodactyl server volume
-[3/5] Installing Palworld Dedicated Server
-[4/5] Seeding writable SteamCMD
-[5/5] Final verification
-Installation completed...
+SERVER_DIR=/home/container
+BACKUP_DIR=/home/container/backups
+LOG_DIR=/home/container/logs
+STEAMCMD_DIR=/home/container/.steamcmd
 ```
 
-## Primeiro boot
-
-Deve começar com:
+Também criamos:
 
 ```text
-[PTERO-ARM64] Preparing writable Wings filesystem...
-[PTERO-ARM64] UID:GID=... ARCH=aarch64
+/home/container/.fex-emu/Config.json
 ```
 
-e depois:
+apontando diretamente para o RootFS já embutido em:
 
 ```text
-=== Palworld Server Entrypoint ===
-Architecture: aarch64
-...
+/opt/fex-rootfs/...
 ```
 
-Se falhar, envie o log desde a primeira linha `[PTERO-ARM64]`.
+Assim FEX também não depende do home do usuário `steam`.
+
+## O que fazer
+
+Se este ZIP estiver sendo usado para atualizar o repositório EXISTENTE:
+
+1. Substitua no GitHub:
+   - `Dockerfile`
+   - `pterodactyl-entrypoint.sh`
+   - `.github/workflows/build.yml`
+
+2. Faça commit/push na `main`.
+
+3. Aguarde o GitHub Actions ficar verde.
+
+4. Confira que foi publicada:
+   `ghcr.io/miiugr4u/palworld-arm64-pterodactyl:v2`
+
+   e também atualizada:
+   `ghcr.io/miiugr4u/palworld-arm64-pterodactyl:latest`
+
+5. No Pterodactyl/Hydrodactyl:
+   - NÃO precisa trocar de URL se já usa `:latest`.
+   - faça `Reinstall` para testar o installer.
+   - depois Start.
+
+Se quiser evitar cache/tag, pode importar `egg-palworld-arm64-v2.json`
+ou trocar temporariamente a imagem para:
+
+`ghcr.io/miiugr4u/palworld-arm64-pterodactyl:v2`
+
+## Log esperado no boot
+
+Agora deve começar:
+
+```text
+[PTERO-ARM64/v2] Wings-native Palworld bootstrap
+[PTERO-ARM64/v2] UID:GID=999:987 ARCH=aarch64
+[PTERO-ARM64/v2] SERVER_DIR=/home/container
+[PTERO-ARM64/v2] STEAMCMD_DIR=/home/container/.steamcmd
+[PTERO-ARM64/v2] FEX RootFS=/opt/fex-rootfs/...
+[PTERO-ARM64/v2] Starting Supersunho manager WITHOUT upstream entrypoint...
+```
+
+NÃO deve mais aparecer:
+
+```text
+[INFO] === Palworld Server Entrypoint ===
+[INFO] Setting up directory permissions...
+mkdir: cannot create directory '/home/steam'
+```
+
+Depois o Python manager deve seguir para:
+
+```text
+Downloading/updating server files...
+Generating server settings...
+Starting Palworld server...
+```
+
+Se falhar, envie todo o log desde `[PTERO-ARM64/v2]`.
