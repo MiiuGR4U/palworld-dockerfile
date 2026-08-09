@@ -1,22 +1,15 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# ------------------------------------------------------------
-# Installer passthrough
-# ------------------------------------------------------------
-# Wings creates installer containers with:
-#   Cmd = [egg_entrypoint, "/mnt/install/install.sh"]
-# while keeping the image ENTRYPOINT. Therefore our wrapper receives:
-#   bash /mnt/install/install.sh
-# and must pass that through unchanged.
+# Pterodactyl installer passthrough.
 case "${1:-}" in
     bash|/bin/bash|sh|/bin/sh)
         exec "$@"
         ;;
 esac
 
-echo "[PTERO-ARM64/v2] Wings-native Palworld bootstrap"
-echo "[PTERO-ARM64/v2] UID:GID=$(id -u):$(id -g) ARCH=$(uname -m)"
+echo "[PTERO-ARM64] Wings-native Palworld bootstrap"
+echo "[PTERO-ARM64] UID:GID=$(id -u):$(id -g) ARCH=$(uname -m)"
 
 case "$(uname -m)" in
     aarch64|arm64) ;;
@@ -26,9 +19,7 @@ case "$(uname -m)" in
         ;;
 esac
 
-# ------------------------------------------------------------
-# Writable state: ONLY /home/container
-# ------------------------------------------------------------
+# All mutable state must stay in the Wings writable server volume.
 mkdir -p \
     /home/container/backups \
     /home/container/logs/palworld \
@@ -44,39 +35,52 @@ mkdir -p \
 
 # Seed writable SteamCMD once.
 if [[ ! -x /home/container/.steamcmd/steamcmd.sh ]]; then
-    echo "[PTERO-ARM64/v2] Seeding writable SteamCMD..."
+    echo "[PTERO-ARM64] Seeding writable SteamCMD..."
     cp -a /opt/steamcmd-seed/. /home/container/.steamcmd/
     chmod 0755 /home/container/.steamcmd/steamcmd.sh
 fi
 
-# ------------------------------------------------------------
-# FEX configuration
-# ------------------------------------------------------------
-# Supersunho's FEX image stores its x86_64 RootFS under /opt/fex-rootfs.
-# Since Wings runs us with a different UID and Pterodactyl reserves HOME as
-# an EggVariable, create a user-local FEX config in the writable volume.
+# Locate the x86_64 RootFS embedded in Supersunho's ARM64 image.
 ROOTFS_DIR="$(find /opt/fex-rootfs -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
 
 if [[ -z "${ROOTFS_DIR}" || ! -d "${ROOTFS_DIR}" ]]; then
     echo "[FATAL] No preinstalled FEX RootFS found under /opt/fex-rootfs."
+    find /opt/fex-rootfs -maxdepth 2 -print 2>/dev/null || true
     exit 21
 fi
 
-printf '{"Config":{"RootFS":"%s"},"ThunksDB":{}}\n' "${ROOTFS_DIR}" \
-    > /home/container/.fex-emu/Config.json
-
+# Pterodactyl reserves HOME as an EggVariable, so set it inside the image.
 export HOME=/home/container
 export XDG_CACHE_HOME=/home/container/.cache
 export XDG_CONFIG_HOME=/home/container/.config
 export XDG_DATA_HOME=/home/container/.local/share
 export TMPDIR=/home/container/tmp
 
+# Supersunho manager writable paths.
 export SERVER_DIR=/home/container
 export BACKUP_DIR=/home/container/backups
 export LOG_DIR=/home/container/logs
 export STEAMCMD_DIR=/home/container/.steamcmd
 
-export FEX_ROOTFS_PATH=/opt/fex-rootfs
+# ------------------------------------------------------------------
+# IMPORTANT FEX FIX
+# ------------------------------------------------------------------
+# FEX runtime consumes FEX_ROOTFS. FEX_ROOTFS_PATH is not the runtime
+# RootFS selector used by FEXBash/FEX.
+export FEX_ROOTFS="${ROOTFS_DIR}"
+
+# Point FEX's user config/data locations to writable Pterodactyl storage too.
+export FEX_APP_CONFIG_LOCATION=/home/container/.fex-emu/
+export FEX_APP_DATA_LOCATION=/home/container/.fex-emu/
+export FEX_APP_CACHE_LOCATION=/home/container/.cache/fex-emu/
+
+mkdir -p "${FEX_APP_CACHE_LOCATION}"
+
+# Keep a valid main config as a fallback. FEX_ROOTFS above is authoritative.
+printf '{"Config":{"RootFS":"%s"}}\n' "${ROOTFS_DIR}" \
+    > /home/container/.fex-emu/Config.json
+
+# ARM64 runtime tuning retained from the upstream image.
 export FEX_ENABLE_JIT_CACHE=1
 export FEX_JIT_CACHE_SIZE=1024
 export FEX_ENABLE_VIXL_SIMULATOR=0
@@ -84,27 +88,40 @@ export FEX_ENABLE_VIXL_DISASSEMBLER=0
 export FEX_ENABLE_LAZY_MEMORY_DELETION=1
 export FEX_ENABLE_STATIC_REGISTER_ALLOCATION=1
 
-echo "[PTERO-ARM64/v2] SERVER_DIR=${SERVER_DIR}"
-echo "[PTERO-ARM64/v2] STEAMCMD_DIR=${STEAMCMD_DIR}"
-echo "[PTERO-ARM64/v2] FEX RootFS=${ROOTFS_DIR}"
+echo "[PTERO-ARM64] SERVER_DIR=${SERVER_DIR}"
+echo "[PTERO-ARM64] STEAMCMD_DIR=${STEAMCMD_DIR}"
+echo "[PTERO-ARM64] FEX_ROOTFS=${FEX_ROOTFS}"
+echo "[PTERO-ARM64] FEX_APP_CONFIG_LOCATION=${FEX_APP_CONFIG_LOCATION}"
 
-# Make failures obvious before starting the manager.
-if [[ ! -x /home/container/.steamcmd/steamcmd.sh ]]; then
+[[ -x /home/container/.steamcmd/steamcmd.sh ]] || {
     echo "[FATAL] Writable SteamCMD bootstrap is missing."
     exit 22
-fi
+}
 
-if [[ ! -d /app/src ]]; then
+[[ -d /app/src ]] || {
     echo "[FATAL] Supersunho manager source /app/src is missing."
     exit 23
+}
+
+command -v FEXBash >/dev/null 2>&1 || {
+    echo "[FATAL] FEXBash is missing from the runtime image."
+    exit 24
+}
+
+# Fail here with a focused FEX error instead of waiting for Palworld manager.
+echo "[PTERO-ARM64] Testing FEX RootFS..."
+if FEXBash -c 'printf "FEX guest bootstrap OK\n"' ; then
+    echo "[PTERO-ARM64] FEX preflight: OK"
+else
+    rc=$?
+    echo "[FATAL] FEX preflight failed with exit code ${rc}."
+    echo "[FATAL] FEX_ROOTFS=${FEX_ROOTFS}"
+    exit "${rc}"
 fi
 
-# ------------------------------------------------------------
-# Runtime
-# ------------------------------------------------------------
 case "${1:---start-server}" in
     --start-server|"")
-        echo "[PTERO-ARM64/v2] Starting Supersunho manager WITHOUT upstream entrypoint..."
+        echo "[PTERO-ARM64] Starting Supersunho manager..."
         cd /app
         exec python -m src.server_manager
         ;;
@@ -115,7 +132,7 @@ case "${1:---start-server}" in
         exec /bin/bash
         ;;
     *)
-        echo "[PTERO-ARM64/v2] Unknown mode '$1'; starting server manager."
+        echo "[PTERO-ARM64] Unknown mode '$1'; starting server manager."
         cd /app
         exec python -m src.server_manager
         ;;
