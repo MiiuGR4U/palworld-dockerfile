@@ -81,6 +81,66 @@
             "field_type": "text"
         },
         {
+            "name": "Auto-Save Interval (Minutes)",
+            "description": "Interval in minutes for automatic world saving via REST API. Set to 0 to disable.",
+            "env_variable": "AUTOSAVE_INTERVAL_MINUTES",
+            "default_value": "15",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto-Save In-Game Announcement",
+            "description": "Broadcast an in-game message to players when auto-save completes.",
+            "env_variable": "AUTOSAVE_NOTIFY_INGAME",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto-Broadcast Interval (Minutes)",
+            "description": "Interval in minutes between automatic in-game chat announcements. Set to 0 to disable.",
+            "env_variable": "ANNOUNCE_INTERVAL_MINUTES",
+            "default_value": "10",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer",
+            "field_type": "text"
+        },
+        {
+            "name": "Auto-Broadcast Messages",
+            "description": "In-game announcement messages, separated by semicolons (;).",
+            "env_variable": "ANNOUNCE_MESSAGES",
+            "default_value": "💬 Entre no nosso Discord!;⚡ Servidor rodando em ARM64 com FEX-Emu;⚔️ Bom jogo a todos!",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Discord Webhook URL",
+            "description": "Optional Discord Webhook URL for server status (online/offline) and player join/leave notifications.",
+            "env_variable": "DISCORD_WEBHOOK_URL",
+            "default_value": "",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "nullable|string",
+            "field_type": "text"
+        },
+        {
+            "name": "Discord Player Notifications",
+            "description": "Send Discord Webhook notifications when players connect or disconnect.",
+            "env_variable": "DISCORD_NOTIFY_PLAYERS",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
             "name": "Server Name",
             "description": "Name displayed in the Palworld server browser.",
             "env_variable": "SERVER_NAME",

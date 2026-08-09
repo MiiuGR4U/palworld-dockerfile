@@ -211,6 +211,17 @@ start_manager() {
         FILTER_SCRIPT="$(pwd)/scripts/log_filter.py"
     fi
 
+    HELPER_SCRIPT="/scripts/palworld_helper.py"
+    if [[ ! -f "${HELPER_SCRIPT}" ]]; then
+        HELPER_SCRIPT="$(pwd)/scripts/palworld_helper.py"
+    fi
+
+    # Launch Helper Suite in background if available
+    if [[ -f "${HELPER_SCRIPT}" ]]; then
+        log_info "Iniciando Palworld Helper Suite (Auto-Save, Broadcast, Discord)..."
+        python -u "${HELPER_SCRIPT}" >/dev/null 2>&1 &
+    fi
+
     if [[ "${QUIET_MONITORING}" == "true" && -f "${FILTER_SCRIPT}" ]]; then
         log_info "Filtro interativo de logs ativado."
         exec python -u -m src.server_manager 2>&1 | python -u "${FILTER_SCRIPT}"
