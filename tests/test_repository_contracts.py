@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -32,6 +33,27 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("DEPOT_DOWNLOADER_SHA256", dockerfile)
         self.assertIn("UE4SS_ARCHIVE_SHA256", dockerfile)
         self.assertIn("sha256:8a396f03c98f0c476275499b1ff663d7208286f37ded0c0446e7c0495c79a285", dockerfile)
+
+    def test_directly_executed_scripts_are_executable_in_git(self):
+        required = {
+            "pterodactyl-entrypoint.sh",
+            "scripts/FEXBash",
+            "scripts/palmodctl",
+            "scripts/validate-shell.sh",
+            "tests/fixtures/fake_fex.sh",
+            "tests/test_entrypoint.sh",
+            "tests/test_fex_wrapper.sh",
+        }
+        output = subprocess.run(
+            ["git", "ls-files", "--stage", "--", *sorted(required)],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        modes = {line.split(maxsplit=3)[3]: line.split(maxsplit=1)[0] for line in output.splitlines()}
+        self.assertEqual(required, set(modes))
+        self.assertTrue(all(modes[path] == "100755" for path in required), modes)
 
     def test_all_mod_flags_are_safe_string_booleans(self):
         egg = json.loads((PROJECT_ROOT / "egg-palworld-arm64.json").read_text(encoding="utf-8"))
