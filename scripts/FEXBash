@@ -1,0 +1,25 @@
+#!/bin/bash
+# Narrow FEXBash adapter: inject the x86_64 preload only into PalServer.sh.
+set -Eeuo pipefail
+
+REAL_FEXBASH="${PALMOD_REAL_FEXBASH:-}"
+[[ -n "${REAL_FEXBASH}" && -x "${REAL_FEXBASH}" ]] || {
+    echo "[palmodctl] [ERROR] PALMOD_REAL_FEXBASH is missing or not executable." >&2
+    exit 40
+}
+
+if [[ "${1:-}" == "-c" \
+    && -n "${2:-}" \
+    && -n "${PALMOD_UE4SS_PRELOAD:-}" \
+    && "${2}" == *"PalServer.sh"* ]]; then
+    [[ -f "${PALMOD_UE4SS_PRELOAD}" ]] || {
+        echo "[palmodctl] [ERROR] Guest UE4SS preload is missing: ${PALMOD_UE4SS_PRELOAD}" >&2
+        exit 41
+    }
+    printf -v quoted_preload '%q' "${PALMOD_UE4SS_PRELOAD}"
+    guest_command="LD_PRELOAD=${quoted_preload} exec ${2}"
+    shift 2
+    exec "${REAL_FEXBASH}" -c "${guest_command}" "$@"
+fi
+
+exec "${REAL_FEXBASH}" "$@"

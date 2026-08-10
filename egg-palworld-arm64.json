@@ -291,6 +291,126 @@
             "field_type": "text"
         },
         {
+            "name": "Mods Enabled",
+            "description": "Enables the palmodctl orchestration layer. Defaults to false so vanilla startup remains equivalent to the proven baseline.",
+            "env_variable": "MODS_ENABLED",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Mod Safe Mode",
+            "description": "Emergency vanilla boot. Disables all managed deployment and UE4SS while preserving every source mod file.",
+            "env_variable": "MODS_SAFE_MODE",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Server Side Only",
+            "description": "Rejects mods declared as client-required. Undocumented compatibility is reported as UNKNOWN and follows the internal policy.",
+            "env_variable": "MODS_SERVER_SIDE_ONLY",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Backup On Mod Change",
+            "description": "Creates a save, config, mod source, and state backup when the SHA256 inventory changes.",
+            "env_variable": "MODS_BACKUP_ON_CHANGE",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Fail On Mod Error",
+            "description": "Stops startup before deployment when static validation or a required loader preflight fails.",
+            "env_variable": "MODS_FAIL_ON_ERROR",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Patch Pak Support",
+            "description": "Enables structurally supported .pak and complete .pak/.utoc/.ucas groups. Client requirements still depend on each mod.",
+            "env_variable": "ENABLE_PATCH_MODS",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Blueprint Support",
+            "description": "Enables Blueprint LogicMods. Experimental on the ARM64/FEX Linux backend and requires a successful UE4SS/loader preflight.",
+            "env_variable": "ENABLE_BLUEPRINT_MODS",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Lua Support",
+            "description": "Enables Lua UE4SS mods. Experimental on the ARM64/FEX Linux backend. Always back up and complete the Player GUID test before first use.",
+            "env_variable": "ENABLE_LUA_MODS",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "C++ Linux Support",
+            "description": "Accepts Linux x86_64 ELF .so modules only. Windows .dll mods are unsupported and rejected on this backend.",
+            "env_variable": "ENABLE_CPP_MODS",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Mod Debug",
+            "description": "Enables additional palmodctl diagnostics without printing passwords, tokens, or webhook secrets.",
+            "env_variable": "MODS_DEBUG",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Strict Mod Version Check",
+            "description": "Refuses UE4SS startup when the current Palworld build cannot be matched to image metadata. Safe Mode and vanilla remain available.",
+            "env_variable": "MODS_STRICT_VERSION_CHECK",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "UE4SS No-Mod Test (ADVANCED)",
+            "description": "Loads the pinned UE4SS Linux runtime with no user UE4SS mods for the mandatory Player GUID/save safety test. Experimental; requires Mods Enabled.",
+            "env_variable": "MODS_UE4SS_TEST_MODE",
+            "default_value": "false",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
             "name": "FEX JIT Cache Size (MB)",
             "description": "Memory allocated for FEX JIT cache in MB.",
             "env_variable": "FEX_JIT_CACHE_SIZE",

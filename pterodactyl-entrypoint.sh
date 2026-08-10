@@ -1,256 +1,421 @@
 #!/bin/bash
-# ==============================================================================
-# Palworld ARM64 — Pterodactyl / Hydrodactyl Entrypoint Script
-# High-resilience, modular, non-root runtime bootstrap with anti-spam UI
-# ==============================================================================
+# Palworld ARM64 — Pterodactyl / Hydrodactyl runtime bootstrap.
 set -Eeuo pipefail
+umask 022
 
-# ------------------------------------------------------------------------------
-# Configurable UI & Logging Customizations
-# ------------------------------------------------------------------------------
+readonly SERVER_ROOT="/home/container"
+readonly DEFAULT_QUERY_PORT="27018"
+
 CONSOLE_LANG="${CONSOLE_LANG:-pt}"
-BANNER_TITLE="${BANNER_TITLE:-Palworld ARM64 - Pterodactyl}"
-STARTUP_MESSAGE="${STARTUP_MESSAGE:-Iniciando Gerenciador Palworld Server...}"
+BANNER_TITLE="${BANNER_TITLE:-Palworld ARM64 / Pterodactyl}"
+STARTUP_MESSAGE="${STARTUP_MESSAGE:-Starting Supersunho Palworld Server Manager...}"
 PREFLIGHT_TEST_MSG="${PREFLIGHT_TEST_MSG:-FEX guest bootstrap OK}"
 ENABLE_COLOR_LOGS="${ENABLE_COLOR_LOGS:-true}"
 QUIET_MONITORING="${QUIET_MONITORING:-true}"
 
 export CONSOLE_LANG ENABLE_COLOR_LOGS QUIET_MONITORING
 
-# ANSI Colors (only applied if ENABLE_COLOR_LOGS=true)
 if [[ "${ENABLE_COLOR_LOGS}" == "true" ]]; then
     C_RESET='\033[0m'
-    C_BOLD='\033[1m'
-    C_BLUE='\033[34m'
     C_GREEN='\033[32m'
     C_YELLOW='\033[33m'
     C_RED='\033[31m'
     C_CYAN='\033[36m'
-    C_MAGENTA='\033[35m'
 else
     C_RESET=''
-    C_BOLD=''
-    C_BLUE=''
     C_GREEN=''
     C_YELLOW=''
     C_RED=''
     C_CYAN=''
-    C_MAGENTA=''
 fi
 
-log_info()    { echo -e "${C_CYAN}[INFO]${C_RESET} $*"; }
-log_success() { echo -e "${C_GREEN}[✔ OK]${C_RESET}  $*"; }
-log_warn()    { echo -e "${C_YELLOW}[AVISO]${C_RESET} $*"; }
-log_fatal()   { echo -e "${C_RED}[ERRO]${C_RESET}  $*"; }
+log_info()  { echo -e "${C_CYAN}[INFO]${C_RESET} $*"; }
+log_ok()    { echo -e "${C_GREEN}[OK]${C_RESET} $*"; }
+log_warn()  { echo -e "${C_YELLOW}[WARN]${C_RESET} $*"; }
+log_error() { echo -e "${C_RED}[ERROR]${C_RESET} $*" >&2; }
 
-log_section() {
-    echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
-    echo -e "${C_CYAN}│${C_RESET}  ${C_BOLD}${C_MAGENTA}$1${C_RESET}"
-    echo -e "${C_CYAN}╰────────────────────────────────────────────────────────────╯${C_RESET}"
+fatal() {
+    local message="$1"
+    local exit_code="${2:-1}"
+    log_error "${message}"
+    exit "${exit_code}"
 }
 
-# Pterodactyl installer passthrough.
-case "${1:-}" in
-    bash|/bin/bash|sh|/bin/sh)
-        exec "$@"
-        ;;
-esac
+is_true() {
+    case "${1:-}" in
+        true|TRUE|True|1|yes|YES|Yes|on|ON|On) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
-# ------------------------------------------------------------------------------
-# 1. Architecture Validation
-# ------------------------------------------------------------------------------
+validate_port() {
+    local name="$1"
+    local value="$2"
+    if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 1 || value > 65535 )); then
+        fatal "Invalid ${name}='${value}'. Expected an integer from 1 to 65535." 25
+    fi
+}
+
+installer_passthrough() {
+    case "${1:-}" in
+        bash|/bin/bash|sh|/bin/sh)
+            exec "$@"
+            ;;
+    esac
+}
+
 validate_architecture() {
-    ARCH="$(uname -m)"
-    if [[ "${ARCH}" != "aarch64" && "${ARCH}" != "arm64" ]]; then
-        log_fatal "Arquitetura não suportada: '${ARCH}'. Esta imagem requer um nó ARM64/aarch64."
-        exit 20
+    RUNTIME_ARCH="$(uname -m)"
+    case "${RUNTIME_ARCH}" in
+        aarch64|arm64) ;;
+        *) fatal "Unsupported architecture '${RUNTIME_ARCH}'. This image requires ARM64/aarch64." 20 ;;
+    esac
+    export RUNTIME_ARCH
+}
+
+validate_runtime_user() {
+    if (( $(id -u) == 0 )); then
+        fatal "Runtime must be non-root. Configure Wings to run this image with the server UID/GID." 23
     fi
 }
 
-# ------------------------------------------------------------------------------
-# 2. Writable Storage Directory Setup
-# ------------------------------------------------------------------------------
-prepare_directories() {
-    log_info "Verificando estrutura de armazenamento em /home/container..."
+prepare_writable_paths() {
+    log_info "Preparing writable paths under ${SERVER_ROOT}..."
     mkdir -p \
-        /home/container/backups \
-        /home/container/logs/palworld \
-        /home/container/.steamcmd \
-        /home/container/Steam \
-        /home/container/.steam/sdk64 \
-        /home/container/tmp \
-        /home/container/.cache/fex-emu \
-        /home/container/.config \
-        /home/container/.local/share \
-        /home/container/.fex-emu \
-        /home/container/Pal/Saved/Config/LinuxServer
+        "${SERVER_ROOT}/backups" \
+        "${SERVER_ROOT}/logs/palworld" \
+        "${SERVER_ROOT}/.steamcmd" \
+        "${SERVER_ROOT}/Steam" \
+        "${SERVER_ROOT}/.steam/sdk64" \
+        "${SERVER_ROOT}/tmp" \
+        "${SERVER_ROOT}/.cache/fex-emu" \
+        "${SERVER_ROOT}/.config" \
+        "${SERVER_ROOT}/.local/share" \
+        "${SERVER_ROOT}/.fex-emu" \
+        "${SERVER_ROOT}/Pal/Saved/Config/LinuxServer"
 }
 
-# ------------------------------------------------------------------------------
-# 3. Writable SteamCMD Seeding
-# ------------------------------------------------------------------------------
 seed_steamcmd() {
-    if [[ ! -x /home/container/.steamcmd/steamcmd.sh ]]; then
-        log_info "Inicializando ambiente gravável do SteamCMD..."
-        if [[ -d /opt/steamcmd-seed ]]; then
-            cp -a /opt/steamcmd-seed/. /home/container/.steamcmd/
-            chmod 0755 /home/container/.steamcmd/steamcmd.sh
-            log_success "SteamCMD inicializado com sucesso."
-        else
-            log_fatal "Diretório de seed do SteamCMD /opt/steamcmd-seed não encontrado!"
-            exit 22
-        fi
+    local target="${SERVER_ROOT}/.steamcmd/steamcmd.sh"
+    if [[ -x "${target}" ]]; then
+        return
     fi
+
+    log_info "Seeding the writable SteamCMD runtime..."
+    [[ -d /opt/steamcmd-seed ]] || fatal "SteamCMD seed directory /opt/steamcmd-seed is missing." 22
+    cp -a /opt/steamcmd-seed/. "${SERVER_ROOT}/.steamcmd/"
+    chmod 0755 "${target}"
+    [[ -x "${target}" ]] || fatal "SteamCMD seed did not produce an executable launcher." 22
+    log_ok "Writable SteamCMD runtime is ready."
 }
 
-# ------------------------------------------------------------------------------
-# 4. Environment & FEX Setup
-# ------------------------------------------------------------------------------
-configure_environment() {
-    export HOME=/home/container
-    export XDG_CACHE_HOME=/home/container/.cache
-    export XDG_CONFIG_HOME=/home/container/.config
-    export XDG_DATA_HOME=/home/container/.local/share
-    export TMPDIR=/home/container/tmp
+configure_writable_environment() {
+    export HOME="${SERVER_ROOT}"
+    export XDG_CACHE_HOME="${SERVER_ROOT}/.cache"
+    export XDG_CONFIG_HOME="${SERVER_ROOT}/.config"
+    export XDG_DATA_HOME="${SERVER_ROOT}/.local/share"
+    export TMPDIR="${SERVER_ROOT}/tmp"
 
-    # Server Manager Paths
-    export SERVER_DIR=/home/container
-    export BACKUP_DIR=/home/container/backups
-    export LOG_DIR=/home/container/logs
-    export STEAMCMD_DIR=/home/container/.steamcmd
+    export SERVER_DIR="${SERVER_ROOT}"
+    export BACKUP_DIR="${SERVER_ROOT}/backups"
+    export LOG_DIR="${SERVER_ROOT}/logs"
+    export STEAMCMD_DIR="${SERVER_ROOT}/.steamcmd"
+}
 
-    # Locate RootFS embedded in image
-    ROOTFS_DIR="$(find /opt/fex-rootfs -mindepth 1 -maxdepth 1 -type d -print -quit 2>/dev/null || true)"
+detect_fex_rootfs() {
+    local preferred="/opt/fex-rootfs/Ubuntu_24_04"
+    local candidates=()
 
-    if [[ -z "${ROOTFS_DIR}" || ! -d "${ROOTFS_DIR}" ]]; then
-        log_fatal "Nenhum FEX RootFS pré-instalado encontrado em /opt/fex-rootfs."
-        exit 21
+    [[ -d /opt/fex-rootfs ]] || fatal "FEX RootFS parent /opt/fex-rootfs is missing." 21
+
+    if [[ -d "${preferred}" ]]; then
+        FEX_ROOTFS="${preferred}"
+    else
+        mapfile -t candidates < <(
+            find /opt/fex-rootfs -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null | sort
+        )
+        if (( ${#candidates[@]} == 0 )); then
+            fatal "No FEX RootFS was found below /opt/fex-rootfs." 21
+        fi
+        if (( ${#candidates[@]} > 1 )); then
+            fatal "Multiple FEX RootFS candidates found and Ubuntu_24_04 is absent: ${candidates[*]}" 21
+        fi
+        FEX_ROOTFS="${candidates[0]}"
     fi
 
-    export FEX_ROOTFS="${ROOTFS_DIR}"
-    export FEX_APP_CONFIG_LOCATION=/home/container/.fex-emu/
-    export FEX_APP_DATA_LOCATION=/home/container/.fex-emu/
-    export FEX_APP_CACHE_LOCATION=/home/container/.cache/fex-emu/
+    if [[ -z "$(find "${FEX_ROOTFS}" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+        fatal "Detected FEX RootFS is empty: ${FEX_ROOTFS}" 21
+    fi
+    export FEX_ROOTFS
+}
 
-    # Write fallback config file
-    printf '{"Config":{"RootFS":"%s"}}\n' "${ROOTFS_DIR}" > /home/container/.fex-emu/Config.json
+configure_fex() {
+    detect_fex_rootfs
 
-    # ARM64 JIT Optimization Defaults
+    export FEX_APP_CONFIG_LOCATION="${SERVER_ROOT}/.fex-emu/"
+    export FEX_APP_DATA_LOCATION="${SERVER_ROOT}/.fex-emu/"
+    export FEX_APP_CACHE_LOCATION="${SERVER_ROOT}/.cache/fex-emu/"
     export FEX_ENABLE_JIT_CACHE="${FEX_ENABLE_JIT_CACHE:-1}"
     export FEX_JIT_CACHE_SIZE="${FEX_JIT_CACHE_SIZE:-1024}"
     export FEX_ENABLE_VIXL_SIMULATOR="${FEX_ENABLE_VIXL_SIMULATOR:-0}"
     export FEX_ENABLE_VIXL_DISASSEMBLER="${FEX_ENABLE_VIXL_DISASSEMBLER:-0}"
     export FEX_ENABLE_LAZY_MEMORY_DELETION="${FEX_ENABLE_LAZY_MEMORY_DELETION:-1}"
     export FEX_ENABLE_STATIC_REGISTER_ALLOCATION="${FEX_ENABLE_STATIC_REGISTER_ALLOCATION:-1}"
+
+    local config_file="${SERVER_ROOT}/.fex-emu/Config.json"
+    local config_temp="${config_file}.tmp.$$"
+    printf '{"Config":{"RootFS":"%s"}}\n' "${FEX_ROOTFS}" > "${config_temp}"
+    chmod 0644 "${config_temp}"
+    mv -f "${config_temp}" "${config_file}"
 }
 
-# ------------------------------------------------------------------------------
-# 5. Port Derivation & Networking
-# ------------------------------------------------------------------------------
-configure_ports() {
-    GAME_PORT="${SERVER_PORT:-8211}"
+fex_preflight() {
+    command -v FEXBash >/dev/null 2>&1 || fatal "FEXBash is missing from the runtime image." 24
 
-    if ! [[ "${GAME_PORT}" =~ ^[0-9]+$ ]] || (( GAME_PORT < 1 || GAME_PORT > 65535 )); then
-        log_fatal "Porta primária Pterodactyl inválida SERVER_PORT='${GAME_PORT}'."
-        exit 25
-    fi
-
-    export PUBLIC_PORT="${GAME_PORT}"
-
-    # Force Palworld listen port through ADDITIONAL_SERVER_OPTIONS
-    USER_ADDITIONAL_OPTIONS="${ADDITIONAL_SERVER_OPTIONS:-}"
-    export ADDITIONAL_SERVER_OPTIONS="${USER_ADDITIONAL_OPTIONS} -port=${GAME_PORT}"
-}
-
-# ------------------------------------------------------------------------------
-# 6. High-Aesthetics Unicode Console Banner
-# ------------------------------------------------------------------------------
-print_banner() {
-    echo -e "${C_CYAN}╭────────────────────────────────────────────────────────────╮${C_RESET}"
-    echo -e "${C_CYAN}│${C_RESET} ${C_BOLD}${C_MAGENTA}${BANNER_TITLE}${C_RESET}"
-    echo -e "${C_CYAN}├────────────────────────────────────────────────────────────┤${C_RESET}"
-    echo -e "${C_CYAN}│${C_RESET}  🎮 ${C_BOLD}Servidor${C_RESET}    : ${SERVER_NAME:-Palworld ARM64 Server}"
-    echo -e "${C_CYAN}│${C_RESET}  ⚡ ${C_BOLD}Arquitetura${C_RESET} : $(uname -m) (UID $(id -u):$(id -g))"
-    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Porta Jogo${C_RESET}  : ${GAME_PORT}/UDP (Alocação Primária)"
-    echo -e "${C_CYAN}│${C_RESET}  🔍 ${C_BOLD}Porta Query${C_RESET} : ${QUERY_PORT:-27018}/UDP (Alocação Extra)"
-    echo -e "${C_CYAN}│${C_RESET}  🛡️ ${C_BOLD}FEX RootFS${C_RESET}  : ${FEX_ROOTFS}"
-    echo -e "${C_CYAN}│${C_RESET}  🔒 ${C_BOLD}Steam Auth${C_RESET}  : ${USE_AUTH:-false} (Desativado para ARM64/FEX)"
-    echo -e "${C_CYAN}│${C_RESET}  🧹 ${C_BOLD}Anti-Spam${C_RESET}   : ${QUIET_MONITORING:-true} (Filtro Inteligente)"
-    echo -e "${C_CYAN}│${C_RESET}  🌐 ${C_BOLD}Idioma${C_RESET}      : ${CONSOLE_LANG:-pt} (Tradução Ativa)"
-    echo -e "${C_CYAN}╰────────────────────────────────────────────────────────────╯${C_RESET}\n"
-}
-
-# ------------------------------------------------------------------------------
-# 7. FEX Preflight Verification
-# ------------------------------------------------------------------------------
-preflight_fex() {
-    command -v FEXBash >/dev/null 2>&1 || {
-        log_fatal "Binário FEXBash não encontrado na imagem."
-        exit 24
-    }
-
-    log_info "Executando teste de preflight da emulação FEX..."
+    log_info "Running the FEX guest bootstrap preflight..."
     if FEXBash -c "printf '%s\\n' '${PREFLIGHT_TEST_MSG}'" >/dev/null 2>&1; then
-        log_success "Teste de preflight FEX concluído com sucesso."
+        log_ok "FEX guest bootstrap OK."
     else
-        rc=$?
-        log_fatal "Teste de preflight FEX falhou com código de saída ${rc}."
-        exit "${rc}"
+        local exit_code=$?
+        fatal "FEX guest bootstrap failed with exit code ${exit_code}." "${exit_code}"
     fi
 }
 
-# ------------------------------------------------------------------------------
-# 8. Start Manager with Anti-Spam & Translation Filter
-# ------------------------------------------------------------------------------
+configure_game_port() {
+    [[ -n "${SERVER_PORT:-}" ]] || fatal "SERVER_PORT was not injected by Pterodactyl." 25
+    validate_port "SERVER_PORT" "${SERVER_PORT}"
+
+    if [[ " ${ADDITIONAL_SERVER_OPTIONS:-} " =~ [[:space:]]-port([=[:space:]]) ]]; then
+        fatal "Do not set -port in ADDITIONAL_SERVER_OPTIONS; the primary allocation controls it." 25
+    fi
+
+    GAME_PORT="${SERVER_PORT}"
+    PUBLIC_PORT="${SERVER_PORT}"
+    ADDITIONAL_SERVER_OPTIONS="${ADDITIONAL_SERVER_OPTIONS:-} -port=${SERVER_PORT}"
+    ADDITIONAL_SERVER_OPTIONS="${ADDITIONAL_SERVER_OPTIONS# }"
+    export GAME_PORT PUBLIC_PORT ADDITIONAL_SERVER_OPTIONS
+}
+
+configure_query_port() {
+    QUERY_PORT="${QUERY_PORT:-${DEFAULT_QUERY_PORT}}"
+    validate_port "QUERY_PORT" "${QUERY_PORT}"
+    export QUERY_PORT
+}
+
+print_runtime_summary() {
+    local auth_state="disabled"
+    local update_state="disabled"
+    local mods_state="disabled"
+    local safe_mode_state="no"
+    is_true "${USE_AUTH:-false}" && auth_state="enabled"
+    is_true "${UPDATE_ON_START:-true}" && update_state="enabled"
+    is_true "${MODS_ENABLED:-false}" && mods_state="enabled"
+    is_true "${MODS_SAFE_MODE:-false}" && safe_mode_state="yes"
+
+    cat <<EOF
+============================================================
+ ${BANNER_TITLE}
+============================================================
+ Architecture                : ${RUNTIME_ARCH}
+ Guest                       : x86_64 / FEX
+ Runtime UID:GID             : $(id -u):$(id -g)
+ Server Dir                  : ${SERVER_ROOT}
+ Primary game allocation     : ${SERVER_IP:-0.0.0.0}:${GAME_PORT}/UDP
+ Palworld listen argument    : -port=${GAME_PORT}
+ PublicPort synchronized     : ${PUBLIC_PORT}
+ Query allocation (EXTRA)    : ${QUERY_PORT}/UDP
+ REST API (internal)         : localhost:${REST_API_PORT:-8212}/TCP
+ RCON (internal)             : localhost:${RCON_PORT:-25575}/TCP
+ FEX RootFS                  : ${FEX_ROOTFS}
+ Steam Auth                  : ${auth_state}
+ Auto Update                 : ${update_state}
+ Mod System                  : ${mods_state}
+ Mod Safe Mode               : ${safe_mode_state}
+============================================================
+EOF
+}
+
+palmodctl_path() {
+    printf '%s\n' "/opt/palworld-mod-runtime/palmodctl"
+}
+
+configure_mod_guest_preload() {
+    local tool="$1"
+    local preload_path=""
+    local real_fex=""
+    local shim_dir="/opt/palworld-mod-runtime/bin"
+
+    if ! preload_path="$("${tool}" preload-path)"; then
+        log_info "UE4SS guest preload not required."
+        return 0
+    fi
+    [[ -f "${preload_path}" ]] || fatal "palmodctl returned a missing preload: ${preload_path}" 33
+
+    real_fex="$(command -v FEXBash || true)"
+    [[ -n "${real_fex}" && -x "${real_fex}" ]] || fatal "Cannot resolve the real FEXBash." 24
+    [[ "${real_fex}" != "${shim_dir}/FEXBash" ]] || fatal "FEXBash shim recursion detected." 33
+
+    export PALMOD_REAL_FEXBASH="${real_fex}"
+    export PALMOD_UE4SS_PRELOAD="${preload_path}"
+    export PATH="${shim_dir}:${PATH}"
+    log_warn "UE4SS Linux EXPERIMENTAL: guest-only preload enabled for PalServer x86_64."
+}
+
+mods_initialize() {
+    local tool
+    tool="$(palmodctl_path)"
+    local inventory="${SERVER_ROOT}/mods/state/inventory.json"
+
+    if ! is_true "${MODS_ENABLED:-false}" \
+        && ! is_true "${MODS_SAFE_MODE:-false}" \
+        && [[ ! -f "${inventory}" ]]; then
+        log_info "Mod system disabled; vanilla baseline path selected."
+        return 0
+    fi
+
+    [[ -x "${tool}" ]] || fatal "palmodctl is required but missing from the image: ${tool}" 30
+
+    if is_true "${MODS_ENABLED:-false}" && ! is_true "${MODS_SAFE_MODE:-false}"; then
+        log_info "Scanning mod source tree (static inspection only)."
+        "${tool}" scan
+        log_info "Validating all detected mods before deployment."
+        if ! "${tool}" validate; then
+            if is_true "${MODS_FAIL_ON_ERROR:-true}"; then
+                log_warn "Validation failed; deployment will record quarantine state and refuse startup."
+            else
+                log_warn "Mod validation reported errors; invalid entries will be skipped/quarantined."
+            fi
+        fi
+    fi
+
+    log_info "Applying mod deployment state."
+    "${tool}" deploy || fatal "palmodctl deployment failed." 32
+    "${tool}" status
+    configure_mod_guest_preload "${tool}"
+}
+
+preserve_custom_ini() {
+    local ini_path="${SERVER_ROOT}/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"
+    local backup_path="${SERVER_ROOT}/tmp/PalWorldSettings.ini.userbak"
+
+    if is_true "${PRESERVE_CUSTOM_SETTINGS:-true}" && [[ -f "${ini_path}" ]]; then
+        log_info "Saving the current PalWorldSettings.ini for the existing compatibility guard."
+        cp -a "${ini_path}" "${backup_path}"
+    fi
+}
+
+MANAGER_PID=""
+HELPER_PID=""
+FILTER_PID=""
+LOG_FIFO=""
+SHUTDOWN_REQUESTED="false"
+
+process_is_running() {
+    local pid="${1:-}"
+    [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
+}
+
+forward_shutdown() {
+    local received_signal="$1"
+    if [[ "${SHUTDOWN_REQUESTED}" == "false" ]]; then
+        SHUTDOWN_REQUESTED="true"
+        log_warn "${received_signal} received; requesting graceful manager shutdown with SIGINT."
+    fi
+
+    if process_is_running "${MANAGER_PID}"; then
+        kill -INT "${MANAGER_PID}" 2>/dev/null || true
+    fi
+    if process_is_running "${HELPER_PID}"; then
+        kill -INT "${HELPER_PID}" 2>/dev/null || true
+    fi
+}
+
+cleanup_runtime_children() {
+    if process_is_running "${HELPER_PID}"; then
+        kill -TERM "${HELPER_PID}" 2>/dev/null || true
+        wait "${HELPER_PID}" 2>/dev/null || true
+    fi
+    if process_is_running "${FILTER_PID}"; then
+        kill -TERM "${FILTER_PID}" 2>/dev/null || true
+        wait "${FILTER_PID}" 2>/dev/null || true
+    fi
+    if [[ -n "${LOG_FIFO}" && -p "${LOG_FIFO}" ]]; then
+        rm -f -- "${LOG_FIFO}"
+    fi
+}
+
+start_helper() {
+    local helper_script="/scripts/palworld_helper.py"
+    [[ -f "${helper_script}" ]] || return 0
+
+    log_info "Starting the Palworld helper suite."
+    python -u "${helper_script}" >/dev/null 2>&1 &
+    HELPER_PID=$!
+}
+
+wait_for_manager() {
+    local exit_code=0
+    while true; do
+        if wait "${MANAGER_PID}"; then
+            exit_code=0
+            break
+        else
+            exit_code=$?
+        fi
+
+        if process_is_running "${MANAGER_PID}"; then
+            continue
+        fi
+        break
+    done
+    return "${exit_code}"
+}
+
 start_manager() {
+    local filter_script="/scripts/log_filter.py"
+    local manager_args=("$@")
+    local manager_exit=0
+
     log_info "${STARTUP_MESSAGE}"
     cd /app
+    preserve_custom_ini
+    start_helper
 
-    FILTER_SCRIPT="/scripts/log_filter.py"
-    if [[ ! -f "${FILTER_SCRIPT}" ]]; then
-        FILTER_SCRIPT="$(pwd)/scripts/log_filter.py"
-    fi
+    trap 'forward_shutdown SIGINT' SIGINT
+    trap 'forward_shutdown SIGTERM' SIGTERM
+    trap cleanup_runtime_children EXIT
 
-    HELPER_SCRIPT="/scripts/palworld_helper.py"
-    if [[ ! -f "${HELPER_SCRIPT}" ]]; then
-        HELPER_SCRIPT="$(pwd)/scripts/palworld_helper.py"
-    fi
-
-    # Optional Preservation of user-edited PalWorldSettings.ini
-    PRESERVE_CUSTOM_SETTINGS="${PRESERVE_CUSTOM_SETTINGS:-true}"
-    INI_PATH="/home/container/Pal/Saved/Config/LinuxServer/PalWorldSettings.ini"
-    BAK_PATH="/home/container/tmp/PalWorldSettings.ini.userbak"
-
-    if [[ "${PRESERVE_CUSTOM_SETTINGS}" == "true" && -f "${INI_PATH}" ]]; then
-        log_info "Criando backup temporário de PalWorldSettings.ini personalizado..."
-        cp -a "${INI_PATH}" "${BAK_PATH}"
-    fi
-
-    # Launch Helper Suite in background if available
-    if [[ -f "${HELPER_SCRIPT}" ]]; then
-        log_info "Iniciando Palworld Helper Suite (Auto-Save, Broadcast, Discord, INI Guard)..."
-        python -u "${HELPER_SCRIPT}" >/dev/null 2>&1 &
-    fi
-
-    if [[ "${QUIET_MONITORING}" == "true" && -f "${FILTER_SCRIPT}" ]]; then
-        log_info "Filtro interativo de logs ativado."
-        exec python -u -m src.server_manager 2>&1 | python -u "${FILTER_SCRIPT}"
+    if is_true "${QUIET_MONITORING}" && [[ -f "${filter_script}" ]]; then
+        LOG_FIFO="${SERVER_ROOT}/tmp/palworld-manager.$$.fifo"
+        [[ ! -e "${LOG_FIFO}" ]] || fatal "Refusing to replace existing log FIFO path: ${LOG_FIFO}" 26
+        mkfifo -m 0600 "${LOG_FIFO}"
+        python -u "${filter_script}" < "${LOG_FIFO}" &
+        FILTER_PID=$!
+        python -u -m src.server_manager "${manager_args[@]}" > "${LOG_FIFO}" 2>&1 &
     else
-        exec python -m src.server_manager
+        python -u -m src.server_manager "${manager_args[@]}" &
     fi
+    MANAGER_PID=$!
+
+    wait_for_manager || manager_exit=$?
+    cleanup_runtime_children
+    trap - EXIT SIGINT SIGTERM
+    return "${manager_exit}"
 }
 
-# ------------------------------------------------------------------------------
-# Main Dispatcher
-# ------------------------------------------------------------------------------
 main() {
+    installer_passthrough "$@"
     validate_architecture
-    prepare_directories
+    validate_runtime_user
+    prepare_writable_paths
     seed_steamcmd
-    configure_environment
-    configure_ports
-    print_banner
-    preflight_fex
+    configure_writable_environment
+    configure_fex
+    configure_game_port
+    configure_query_port
+    print_runtime_summary
+    fex_preflight
+    mods_initialize
 
     case "${1:---start-server}" in
         --start-server|"")
@@ -263,11 +428,12 @@ main() {
             exec /bin/bash
             ;;
         *)
-            log_info "Comando customizado: '$*'"
-            cd /app
-            exec python -m src.server_manager "$@"
+            log_info "Passing custom arguments to the Supersunho manager: $*"
+            start_manager "$@"
             ;;
     esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

@@ -1,112 +1,45 @@
-# PATCH v2 — Palworld ARM64 / Pterodactyl
+# Palworld ARM64 para Pterodactyl/Hydrodactyl
 
-## O erro corrigido
+Imagem e Egg para executar o Palworld Dedicated Server Linux x86_64 em nós ARM64 através do FEX-Emu, sem root, privileged, FUSE, Wine, Proton, QEMU, Box64 ou Box32 no runtime.
 
-A v1 ainda executava o entrypoint original do Supersunho:
+O baseline funcional permanece:
+
+```text
+Wings ARM64 -> container non-root -> manager Supersunho -> FEX -> PalServer Linux x86_64
+```
+
+O sistema de mods é opt-in. Com `MODS_ENABLED=false`, nenhum loader ou `LD_PRELOAD` é injetado. A porta do jogo sempre vem da Primary Allocation (`SERVER_PORT`); `QUERY_PORT` usa uma allocation UDP extra.
+
+## Estado de suporte
+
+| Tipo | Estado | Observação |
+| --- | --- | --- |
+| Patch Pak | Implementado; gate runtime pendente | `.pak` ou trio `.pak/.utoc/.ucas`; requisito de cliente depende do mod |
+| Blueprint | EXPERIMENTAL | UE4SS Linux + BP loader; hooks podem variar por build |
+| Lua | EXPERIMENTAL | UE4SS Linux; scripts Windows-specific podem não funcionar |
+| C++ | EXPERIMENTAL/limitado | Apenas ELF x86_64 `.so` em Linux |
+| Windows DLL | UNSUPPORTED | Rejeitada explicitamente |
+
+Não declare “full mod support” até a matriz ARM64/FEX, GUID e integridade de saves estar completa.
+
+## Início rápido
+
+1. Importe `egg-palworld-arm64.json`.
+2. Escolha uma Primary Allocation UDP para o jogo.
+3. Opcionalmente adicione uma allocation UDP extra e configure `QUERY_PORT`.
+4. Mantenha `USE_AUTH=false` no backend ARM64/FEX.
+5. Instale e inicie vanilla antes de habilitar mods.
+6. Leia [docs/MODS.md](docs/MODS.md) e [docs/UE4SS-LINUX.md](docs/UE4SS-LINUX.md) antes da primeira ativação de UE4SS.
+
+## Validação local
 
 ```bash
-exec /entrypoint-upstream.sh "$@"
+python scripts/validate_egg.py
+python scripts/validate-shell.py
+python scripts/test_ini_preservation.py
+python -m unittest discover -s tests -v
+bash tests/test_entrypoint.sh
+bash tests/test_fex_wrapper.sh
 ```
 
-O entrypoint original SEMPRE chama `setup_permissions()` e essa função possui
-`/home/steam/...` hardcoded.
-
-No Wings o runtime é não-root, então isso termina em:
-
-```text
-mkdir: cannot create directory '/home/steam': Permission denied
-```
-
-## O que a v2 faz
-
-A v2 NÃO executa mais o entrypoint original.
-
-Ela usa diretamente:
-
-```bash
-cd /app
-exec python -m src.server_manager
-```
-
-O próprio manager do Supersunho usa os paths configuráveis:
-
-```text
-SERVER_DIR=/home/container
-BACKUP_DIR=/home/container/backups
-LOG_DIR=/home/container/logs
-STEAMCMD_DIR=/home/container/.steamcmd
-```
-
-Também criamos:
-
-```text
-/home/container/.fex-emu/Config.json
-```
-
-apontando diretamente para o RootFS já embutido em:
-
-```text
-/opt/fex-rootfs/...
-```
-
-Assim FEX também não depende do home do usuário `steam`.
-
-## O que fazer
-
-Se este ZIP estiver sendo usado para atualizar o repositório EXISTENTE:
-
-1. Substitua no GitHub:
-   - `Dockerfile`
-   - `pterodactyl-entrypoint.sh`
-   - `.github/workflows/build.yml`
-
-2. Faça commit/push na `main`.
-
-3. Aguarde o GitHub Actions ficar verde.
-
-4. Confira que foi publicada:
-   `ghcr.io/miiugr4u/palworld-arm64-pterodactyl:v2`
-
-   e também atualizada:
-   `ghcr.io/miiugr4u/palworld-arm64-pterodactyl:latest`
-
-5. No Pterodactyl/Hydrodactyl:
-   - NÃO precisa trocar de URL se já usa `:latest`.
-   - faça `Reinstall` para testar o installer.
-   - depois Start.
-
-Se quiser evitar cache/tag, pode importar `egg-palworld-arm64-v2.json`
-ou trocar temporariamente a imagem para:
-
-`ghcr.io/miiugr4u/palworld-arm64-pterodactyl:v2`
-
-## Log esperado no boot
-
-Agora deve começar:
-
-```text
-[PTERO-ARM64/v2] Wings-native Palworld bootstrap
-[PTERO-ARM64/v2] UID:GID=999:987 ARCH=aarch64
-[PTERO-ARM64/v2] SERVER_DIR=/home/container
-[PTERO-ARM64/v2] STEAMCMD_DIR=/home/container/.steamcmd
-[PTERO-ARM64/v2] FEX RootFS=/opt/fex-rootfs/...
-[PTERO-ARM64/v2] Starting Supersunho manager WITHOUT upstream entrypoint...
-```
-
-NÃO deve mais aparecer:
-
-```text
-[INFO] === Palworld Server Entrypoint ===
-[INFO] Setting up directory permissions...
-mkdir: cannot create directory '/home/steam'
-```
-
-Depois o Python manager deve seguir para:
-
-```text
-Downloading/updating server files...
-Generating server settings...
-Starting Palworld server...
-```
-
-Se falhar, envie todo o log desde `[PTERO-ARM64/v2]`.
+Arquitetura e auditoria do baseline: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) e [docs/BASELINE-AUDIT.md](docs/BASELINE-AUDIT.md).

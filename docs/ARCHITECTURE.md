@@ -55,3 +55,26 @@
 
 5. **Process Manager**:
    - Python-based server manager from Supersunho invoked via `cd /app && exec python -m src.server_manager`.
+
+## Mod orchestration boundary
+
+```text
+writable/FEX/network preflight
+  -> palmodctl static scan + validation
+  -> SHA256 change detection + backup
+  -> staging + transactional deployment
+  -> optional guest-only UE4SS preload
+  -> unchanged Supersunho manager path
+```
+
+`/home/container/mods` is the source of truth. Patch targets live below `Pal/Content/Paks`; Blueprint uses `LogicMods`; Lua/C++ use the uppercase `Mods` tree beside `PalServer.sh`. Managed copies are recorded in `mods/state/inventory.json` and can be removed without deleting sources.
+
+When UE4SS is required, an ARM64 `FEXBash` adapter changes only the guest command containing `PalServer.sh`. SteamCMD and ARM64 processes never receive the x86_64 preload.
+
+## Future backend (not implemented)
+
+```text
+ARM64 -> FEX -> Wine/Proton -> Windows PalServer -> Windows UE4SS -> DLL
+```
+
+This is documentation only. The primary backend remains native Linux x86_64 PalServer under FEX.

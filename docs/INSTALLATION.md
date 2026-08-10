@@ -40,3 +40,13 @@ Click **Start** in the Pterodactyl console. The server bootstrap will:
 - Run FEX guest preflight verification.
 - Derive the game port automatically from `SERVER_PORT`.
 - Launch Palworld.
+
+### 5. Enabling Mods Safely
+
+1. Start vanilla with `MODS_ENABLED=false` and verify the existing character/save.
+2. Upload each mod to its explicit category below `/home/container/mods/`.
+3. For Patch only, set `MODS_ENABLED=true` and leave UE4SS categories false.
+4. Before Blueprint/Lua/C++, read `UE4SS-LINUX.md`, take an external backup, and complete the no-mod identity gate.
+5. Use `MODS_SAFE_MODE=true` for emergency vanilla startup; files in the source tree are preserved.
+
+The image never downloads user mods automatically.

@@ -41,3 +41,7 @@ When running `PalServer-Linux-Shipping` under FEX emulation:
 - Steam API ticket verification (`bUseAuth=True`) communicates with native `steamclient.so` via IPC.
 - Inter-process ticket validation under emulation frequently causes client handshakes to fail with `kicked by AUTH. Error: Invalid AppTicket`.
 - Setting `USE_AUTH=false` disables ticket authorization while maintaining password protection via `SERVER_PASSWORD`.
+
+## UE4SS architecture isolation
+
+`libUE4SS.so` is x86_64. It must never be exported through the global ARM64 environment. When required, the entrypoint records the real `FEXBash`, prepends a narrow adapter to `PATH`, and the adapter injects `LD_PRELOAD` only into the guest `PalServer.sh` command. FEX preflight and SteamCMD pass through unchanged.

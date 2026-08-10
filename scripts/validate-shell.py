@@ -16,7 +16,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 def validate_shell():
     project_dir = Path(__file__).parent.parent
-    sh_files = list(project_dir.glob("*.sh"))
+    sh_files = sorted(
+        path
+        for path in project_dir.rglob("*.sh")
+        if ".git" not in path.parts
+    )
 
     print("\n" + "=" * 64)
     print(f"  Auditing Shell Scripts in {project_dir.name}")
@@ -30,7 +34,7 @@ def validate_shell():
     errors = 0
 
     for script in sh_files:
-        filename = script.name
+        filename = script.relative_to(project_dir)
         if bash_path:
             cmd = [bash_path, "-n", str(script)]
             res = subprocess.run(cmd, capture_output=True, text=True)

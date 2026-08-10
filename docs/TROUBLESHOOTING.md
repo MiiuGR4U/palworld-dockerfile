@@ -43,3 +43,27 @@ This document records known runtime issues, error signatures, root causes, and v
 - **Symptom**: Pterodactyl/Hydrodactyl panel throws validation error when importing `egg-palworld-arm64.json`.
 - **Cause**: Variable `HOME` declared in Egg JSON `variables`.
 - **Solution**: Remove `HOME` from Egg variables list; export `HOME=/home/container` inside container entrypoint.
+
+---
+
+### Issue 7: `Windows DLL detected`
+- **Cause**: A Windows UE4SS `.dll` or PE binary was uploaded to the Linux backend.
+- **Solution**: Remove/disable the entry or obtain a Linux x86_64 ELF `.so`. Renaming is not conversion.
+
+---
+
+### Issue 8: `UE4SS preflight failed`
+- **Cause**: Missing/invalid pinned loader files, unknown strict-version match, or missing Blueprint components.
+- **Solution**: Enable `MODS_SAFE_MODE=true`, boot vanilla, inspect `palmodctl doctor` and image metadata. Do not bypass the preflight on production saves.
+
+---
+
+### Issue 9: Character appears new after UE4SS
+- **Severity**: Critical.
+- **Action**: Stop, enable Safe Mode, preserve all logs/states, compare PlayerUID/GUID/save filename, and use explicit rollback only after review. Do not continue testing mods.
+
+---
+
+### Issue 10: Invalid mod quarantined
+- **Cause**: Invalid manifest, incomplete Pak group, missing `scripts/main.lua`, DLL/PE, wrong ELF architecture, or dependency error.
+- **Solution**: Correct the source, then clear logical quarantine with `palmodctl quarantine MOD_ID --clear` and restart.

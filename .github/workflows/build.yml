@@ -7,6 +7,11 @@ on:
     paths:
       - Dockerfile
       - pterodactyl-entrypoint.sh
+      - egg-palworld-arm64.json
+      - modsystem/**
+      - runtime/**
+      - scripts/**
+      - tests/**
       - .github/workflows/build.yml
 
 permissions:
@@ -19,6 +24,16 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Validate Egg, shell, and Python tests
+        shell: bash
+        run: |
+          python scripts/validate_egg.py
+          python scripts/validate-shell.py
+          python scripts/test_ini_preservation.py
+          python -m unittest discover -s tests -v
+          bash tests/test_entrypoint.sh
+          bash tests/test_fex_wrapper.sh
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

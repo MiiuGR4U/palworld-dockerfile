@@ -1,0 +1,10 @@
+{
+  "backend": "linux-fex",
+  "base_image_digest": "sha256:8a396f03c98f0c476275499b1ff663d7208286f37ded0c0446e7c0495c79a285",
+  "build_date": "2026-08-10",
+  "depot_downloader": "3.4.0",
+  "palmodctl": "0.1.0",
+  "palworld_tested": "runtime test pending",
+  "status": "EXPERIMENTAL",
+  "ue4ss_linux": "v1.0.2-palworld-linux"
+}

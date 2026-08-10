@@ -10,6 +10,9 @@
 ├── scripts/
 │   ├── validate-egg.py           # Automated Egg configuration auditor
 │   └── validate-shell.py         # Cross-platform shell syntax validator
+├── modsystem/                    # stdlib-only palmodctl package
+├── runtime/                      # pinned loader/build metadata
+├── tests/                        # unit and shell contract tests
 ├── docs/                         # Technical documentation suite
 └── mind/                         # Persistent project memory state
 ```
@@ -24,7 +27,18 @@ python scripts/validate-egg.py
 
 # 2. Audit Shell Script syntax
 python scripts/validate-shell.py
+
+# 3. Run repository unit tests
+python -m unittest discover -s tests -v
+
+# 4. Run the production INI preservation smoke test
+python scripts/test_ini_preservation.py
+
+# 5. Verify guest-only UE4SS routing (Linux/Git Bash)
+bash tests/test_fex_wrapper.sh
 ```
+
+Docker/ARM64 execution remains a separate gate. A green unit suite proves static policy and file transactions, not Palworld hook compatibility or player identity.
 
 ## Branching Strategy
 

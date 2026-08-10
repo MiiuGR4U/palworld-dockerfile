@@ -17,6 +17,16 @@
 - **Public Port Sync**: `PUBLIC_PORT` is synchronized automatically to match `SERVER_PORT`.
 - **User Action**: The administrator does **not** need to manually configure the primary game port.
 
+Expected startup lines:
+
+```text
+Primary game allocation     : IP:PORT/UDP
+Palworld listen argument    : -port=PORT
+PublicPort synchronized     : PORT
+```
+
+Do not add `-port` to `ADDITIONAL_SERVER_OPTIONS`; startup rejects a duplicate override.
+
 ---
 
 ## 2. Steam Query Port (Extra Allocation)
