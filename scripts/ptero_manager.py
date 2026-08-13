@@ -105,6 +105,38 @@ def run_steamcmd_update():
             print(f"[STEAMCMD] {line}", flush=True)
 
 
+def fix_steamclient():
+    """
+    Palworld dedicated server on Linux requires steamclient.so in ~/.steam/sdk64/
+    Otherwise it will crash with S_API FAIL.
+    """
+    print("[BOOT] Verifying steamclient.so paths...", flush=True)
+    steamcmd_dir = os.path.join(SERVER_ROOT, ".steamcmd")
+    source_client = os.path.join(steamcmd_dir, "linux64", "steamclient.so")
+    
+    sdk64_dir = os.path.join(SERVER_ROOT, ".steam", "sdk64")
+    target_client = os.path.join(sdk64_dir, "steamclient.so")
+    
+    bin_target = os.path.join(SERVER_ROOT, "Pal", "Binaries", "Linux", "steamclient.so")
+
+    if os.path.exists(source_client):
+        os.makedirs(sdk64_dir, exist_ok=True)
+        try:
+            shutil.copy2(source_client, target_client)
+            print(f"[BOOT] Copied steamclient.so to {target_client}", flush=True)
+        except Exception as e:
+            print(f"[BOOT] Failed to copy steamclient.so to sdk64: {e}", flush=True)
+            
+        try:
+            if os.path.exists(os.path.dirname(bin_target)):
+                shutil.copy2(source_client, bin_target)
+                print(f"[BOOT] Copied steamclient.so to {bin_target}", flush=True)
+        except Exception as e:
+            print(f"[BOOT] Failed to copy steamclient.so to Binaries: {e}", flush=True)
+    else:
+        print(f"[BOOT] WARNING: Source steamclient.so not found at {source_client}", flush=True)
+
+
 # --- Manager Process ---
 class ManagerWrapper:
     def __init__(self):
@@ -291,6 +323,9 @@ if __name__ == "__main__":
     # 1. Update Phase
     if UPDATE_ON_START:
         run_steamcmd_update()
+
+    # 1.5 Fix steamclient.so
+    fix_steamclient()
 
     # 2. Start Manager
     wrapper.start(sys.argv[1:])
