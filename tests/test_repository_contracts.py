@@ -23,7 +23,7 @@ class RepositoryContractTests(unittest.TestCase):
 
     def test_upstream_manager_entry_path_is_preserved(self):
         entrypoint = (PROJECT_ROOT / "pterodactyl-entrypoint.sh").read_text(encoding="utf-8")
-        self.assertIn("python -u -m src.server_manager", entrypoint)
+        self.assertIn("exec python -u /scripts/ptero_manager.py", entrypoint)
         self.assertNotIn("/entrypoint.sh", entrypoint)
 
     def test_image_declares_non_root_runtime(self):
@@ -39,6 +39,7 @@ class RepositoryContractTests(unittest.TestCase):
             "pterodactyl-entrypoint.sh",
             "scripts/FEXBash",
             "scripts/palmodctl",
+            "scripts/ptero_manager.py",
             "scripts/validate-shell.sh",
             "tests/fixtures/fake_fex.sh",
             "tests/test_entrypoint.sh",
