@@ -63,6 +63,7 @@ COPY --from=tools /out/steamcmd /opt/steamcmd-seed
 COPY --chmod=0755 pterodactyl-entrypoint.sh /pterodactyl-entrypoint.sh
 COPY --chmod=0755 scripts/log_filter.py /scripts/log_filter.py
 COPY --chmod=0755 scripts/palworld_helper.py /scripts/palworld_helper.py
+COPY --chmod=0755 scripts/ptero_manager.py /scripts/ptero_manager.py
 COPY modsystem /opt/palworld-mod-runtime/modsystem
 COPY --chmod=0755 scripts/palmodctl /opt/palworld-mod-runtime/palmodctl
 COPY --chmod=0755 scripts/FEXBash /opt/palworld-mod-runtime/bin/FEXBash

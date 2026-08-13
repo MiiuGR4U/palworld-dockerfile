@@ -304,45 +304,8 @@ preserve_custom_ini() {
     fi
 }
 
-MANAGER_PID=""
-HELPER_PID=""
-FILTER_PID=""
-LOG_FIFO=""
-SHUTDOWN_REQUESTED="false"
-
-process_is_running() {
-    local pid="${1:-}"
-    [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
-}
-
-forward_shutdown() {
-    local received_signal="$1"
-    if [[ "${SHUTDOWN_REQUESTED}" == "false" ]]; then
-        SHUTDOWN_REQUESTED="true"
-        log_warn "${received_signal} received; requesting graceful manager shutdown with SIGINT."
-    fi
-
-    if process_is_running "${MANAGER_PID}"; then
-        kill -INT "${MANAGER_PID}" 2>/dev/null || true
-    fi
-    if process_is_running "${HELPER_PID}"; then
-        kill -INT "${HELPER_PID}" 2>/dev/null || true
-    fi
-}
-
-cleanup_runtime_children() {
-    if process_is_running "${HELPER_PID}"; then
-        kill -TERM "${HELPER_PID}" 2>/dev/null || true
-        wait "${HELPER_PID}" 2>/dev/null || true
-    fi
-    if process_is_running "${FILTER_PID}"; then
-        kill -TERM "${FILTER_PID}" 2>/dev/null || true
-        wait "${FILTER_PID}" 2>/dev/null || true
-    fi
-    if [[ -n "${LOG_FIFO}" && -p "${LOG_FIFO}" ]]; then
-        rm -f -- "${LOG_FIFO}"
-    fi
-}
+# Forward shutdown, process_is_running, cleanup_runtime_children, and wait_for_manager 
+# are obsolete as ptero_manager.py handles everything in Python now.
 
 start_helper() {
     local helper_script="/scripts/palworld_helper.py"
@@ -353,54 +316,20 @@ start_helper() {
     HELPER_PID=$!
 }
 
-wait_for_manager() {
-    local exit_code=0
-    while true; do
-        if wait "${MANAGER_PID}"; then
-            exit_code=0
-            break
-        else
-            exit_code=$?
-        fi
-
-        if process_is_running "${MANAGER_PID}"; then
-            continue
-        fi
-        break
-    done
-    return "${exit_code}"
-}
+# Wait for manager removed
 
 start_manager() {
-    local filter_script="/scripts/log_filter.py"
     local manager_args=("$@")
-    local manager_exit=0
 
     log_info "${STARTUP_MESSAGE}"
     cd /app
     preserve_custom_ini
     start_helper
 
-    trap 'forward_shutdown SIGINT' SIGINT
-    trap 'forward_shutdown SIGTERM' SIGTERM
-    trap cleanup_runtime_children EXIT
-
-    if is_true "${QUIET_MONITORING}" && [[ -f "${filter_script}" ]]; then
-        LOG_FIFO="${SERVER_ROOT}/tmp/palworld-manager.$$.fifo"
-        [[ ! -e "${LOG_FIFO}" ]] || fatal "Refusing to replace existing log FIFO path: ${LOG_FIFO}" 26
-        mkfifo -m 0600 "${LOG_FIFO}"
-        python -u "${filter_script}" < "${LOG_FIFO}" &
-        FILTER_PID=$!
-        python -u -m src.server_manager "${manager_args[@]}" > "${LOG_FIFO}" 2>&1 &
-    else
-        python -u -m src.server_manager "${manager_args[@]}" &
-    fi
-    MANAGER_PID=$!
-
-    wait_for_manager || manager_exit=$?
-    cleanup_runtime_children
-    trap - EXIT SIGINT SIGTERM
-    return "${manager_exit}"
+    # Delegate the rest of execution (SteamCMD, signals, interactive console, and manager wrapper)
+    # to the new Python Pterodactyl manager. Using exec replaces PID 1.
+    log_info "Delegating to Pterodactyl Integration Manager (ptero_manager.py)..."
+    exec python -u /scripts/ptero_manager.py "${manager_args[@]}"
 }
 
 main() {

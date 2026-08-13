@@ -271,6 +271,26 @@
             "field_type": "text"
         },
         {
+            "name": "Backup Before Update",
+            "description": "Backup Palworld Save files before triggering an update.",
+            "env_variable": "BACKUP_BEFORE_UPDATE",
+            "default_value": "true",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|string|in:true,false",
+            "field_type": "text"
+        },
+        {
+            "name": "Graceful Shutdown Timeout",
+            "description": "Seconds to wait for the server to gracefully stop before forcefully killing it.",
+            "env_variable": "GRACEFUL_SHUTDOWN_TIMEOUT",
+            "default_value": "120",
+            "user_viewable": true,
+            "user_editable": true,
+            "rules": "required|integer|min:30|max:600",
+            "field_type": "text"
+        },
+        {
             "name": "Validate Steam Files",
             "description": "Validate Palworld game files during updates.",
             "env_variable": "STEAMCMD_VALIDATE",
