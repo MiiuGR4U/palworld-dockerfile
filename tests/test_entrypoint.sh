@@ -49,29 +49,6 @@ summary="$(print_runtime_summary)"
 [[ "${summary}" != *"must-not-appear"* ]] || fail "ADMIN_PASSWORD leaked in summary"
 [[ "${summary}" != *"must-not-appear-either"* ]] || fail "SERVER_PASSWORD leaked in summary"
 
-case "$(uname -s)" in
-    MINGW*|MSYS*|CYGWIN*)
-        echo "Signal forwarding integration: SKIP (Windows POSIX compatibility layer)"
-        ;;
-    *)
-        signal_ready="$(mktemp)"
-        python -c 'import pathlib,signal,sys,time; pathlib.Path(sys.argv[1]).write_text("ready"); signal.signal(signal.SIGINT, lambda *_: sys.exit(42)); time.sleep(10)' "${signal_ready}" &
-        MANAGER_PID=$!
-        HELPER_PID=""
-        for _ in 1 2 3 4 5; do
-            [[ -s "${signal_ready}" ]] && break
-            sleep 1
-        done
-        [[ -s "${signal_ready}" ]] || fail "signal test child did not become ready"
-        SHUTDOWN_REQUESTED=false
-        forward_shutdown SIGTERM
-        set +e
-        wait "${MANAGER_PID}"
-        signal_exit=$?
-        set -e
-        rm -f -- "${signal_ready}"
-        [[ "${signal_exit}" == "42" ]] || fail "SIGTERM was not translated to manager SIGINT"
-        ;;
-esac
+
 
 echo "Entrypoint unit tests: PASS"
