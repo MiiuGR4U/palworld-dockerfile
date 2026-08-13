@@ -83,7 +83,7 @@ def run_steamcmd_update():
         print(f"[UPDATE] SteamCMD not found at {steamcmd_sh}. Skipping update.", flush=True)
         return
 
-    cmd_str = f'"{steamcmd_sh}" +force_install_dir "{SERVER_ROOT}" +login anonymous +app_update 2394010 validate +quit'
+    cmd_str = f'"{steamcmd_sh}" +@sSteamCmdForcePlatformType linux +@sSteamCmdForcePlatformBitness 64 +force_install_dir "{SERVER_ROOT}" +login anonymous +app_update 2394010 validate +quit'
     cmd = ["FEXBash", "-c", cmd_str]
 
     print("[UPDATE] Running update... This may take a while.", flush=True)
