@@ -69,6 +69,19 @@ def preserve_user_ini():
                 elif "OptionSettings=(" in custom_content:
                     custom_content = custom_content.replace("OptionSettings=(", f"OptionSettings=(RESTAPIPort={REST_PORT},")
 
+                auth_bool = os.getenv("USE_AUTH", "false").lower() in ("true", "1", "yes")
+                auth_str = "True" if auth_bool else "False"
+                if "bUseAuth=" in custom_content:
+                    custom_content = re.sub(r"bUseAuth=\w+", f"bUseAuth={auth_str}", custom_content)
+                elif "OptionSettings=(" in custom_content:
+                    custom_content = custom_content.replace("OptionSettings=(", f"OptionSettings=(bUseAuth={auth_str},")
+
+                game_port = os.getenv("SERVER_PORT", "25565")
+                if "PublicPort=" in custom_content:
+                    custom_content = re.sub(r"PublicPort=\d+", f"PublicPort={game_port}", custom_content)
+                elif "OptionSettings=(" in custom_content:
+                    custom_content = custom_content.replace("OptionSettings=(", f"OptionSettings=(PublicPort={game_port},")
+
                 if ADMIN_PASSWORD and ADMIN_PASSWORD != "change-me-now":
                     if 'AdminPassword=' in custom_content:
                         custom_content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', custom_content)

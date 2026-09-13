@@ -37,15 +37,18 @@ SUPPRESS_PATTERNS = [
     re.compile(r"^>\s+"),
     re.compile(r"^<\s+"),
     re.compile(r"^(Host|user-agent|accept|x-sentry-auth|content-type|content-length):\s*"),
-    re.compile(r"^o1291919\.ingest\.us\.sentry\.io"),
+    re.compile(r"o1291919\.ingest\.us\.sentry\.io"),
     re.compile(r"^\{\}\* Connection #"),
+    re.compile(r"SSL certificate verify ok"),
+    re.compile(r"Using HTTP2"),
     re.compile(r"^\[S_API FAIL\] Tried to access Steam interface"),
     re.compile(r"Server process started, verifying startup\.\.\."),
     re.compile(r"Verifying server process startup\.\.\."),
     re.compile(r"Checking process stability for 10 seconds\.\.\."),
     re.compile(r"Cleared only user-added callbacks"),
     re.compile(r"API returned None"),
-    re.compile(r"Monitoring cycle took \d+ms - performance issue detected"),
+    re.compile(r"Monitoring cycle took \d+ms"),
+    re.compile(r"Idle restart monitoring is disabled"),
     re.compile(r"API call failed: None"),
 ]
 
@@ -135,15 +138,27 @@ TRANSFORM_RULES_PT = [
         re.compile(r"Game version is (.*)"),
         f"{C_GREEN}📦 [VERSÃO]{C_RESET} Versão do Palworld: {C_BOLD}\\1{C_RESET}"
     ),
+    (
+        re.compile(r"\[PALWORLD\] Servidor pronto para conexões na porta (\d+)! Versão: (.*)"),
+        f"{C_GREEN}🎮 [PRONTO]{C_RESET} {C_BOLD}Servidor pronto para conexões na porta \\1! Versão: {C_CYAN}\\2{C_RESET}"
+    ),
 ]
 
 def format_line(line: str) -> str:
     if CONSOLE_LANG == "raw":
         return line
 
+    for pattern in SUPPRESS_PATTERNS:
+        if pattern.search(line):
+            return ""
+
     # Strip ISO timestamp prefix if present: [INFO] 2026-08-09T16:39:58 text
     clean_line = re.sub(r"^\[INFO\]\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\s*", "", line)
     clean_line = re.sub(r"^\[WARNING\]\s+\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\s*", "", clean_line)
+
+    for pattern in SUPPRESS_PATTERNS:
+        if pattern.search(clean_line):
+            return ""
 
     for pattern, replacement in TRANSFORM_RULES_PT:
         if pattern.search(clean_line):

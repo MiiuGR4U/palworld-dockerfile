@@ -13,6 +13,7 @@ import json
 import threading
 from urllib.request import Request, urlopen
 import shutil
+import re
 from datetime import datetime
 
 # Environment Variables
@@ -22,6 +23,7 @@ GRACEFUL_SHUTDOWN_TIMEOUT = int(os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "120"))
 REST_PORT = os.getenv("REST_API_PORT", "8212")
 REST_HOST = os.getenv("REST_API_HOST", "localhost")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me-now")
+CONSOLE_LANG = os.getenv("CONSOLE_LANG", "pt").lower()
 BASE_URL = f"http://{REST_HOST}:{REST_PORT}/v1/api"
 
 import base64
@@ -51,7 +53,8 @@ def check_update_enabled() -> bool:
 
 UPDATE_ON_START = check_update_enabled()
 BACKUP_BEFORE_UPDATE = is_truthy(os.getenv("BACKUP_BEFORE_UPDATE", "true"))
-QUIET_MONITORING = is_truthy(os.getenv("QUIET_MONITORING", "true"))
+_qm = os.getenv("QUIET_MONITORING")
+QUIET_MONITORING = True if _qm is None or _qm.strip() == "" else is_truthy(_qm)
 
 try:
     import log_filter
@@ -242,41 +245,161 @@ def fix_steamclient():
         print(f"[BOOT] WARNING: Source steamclient.so not found at {source_client}", flush=True)
 
 
-def ensure_rest_api_in_ini():
-    ini_path = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
-    if not os.path.exists(ini_path):
-        return
+def configure_palworld_ini(file_path: str) -> bool:
+    if not os.path.exists(file_path):
+        return False
     try:
-        with open(ini_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        import re
+        if not content.strip() or "OptionSettings=(" not in content:
+            return False
+
         modified = False
+
+        # 1. bIsUseRestAPI=True
         if "bIsUseRestAPI=" in content:
             if "bIsUseRestAPI=True" not in content:
                 content = re.sub(r"bIsUseRestAPI=\w+", "bIsUseRestAPI=True", content)
                 modified = True
-        elif "OptionSettings=(" in content:
+        else:
             content = content.replace("OptionSettings=(", "OptionSettings=(bIsUseRestAPI=True,")
             modified = True
 
+        # 2. RESTAPIPort
         if "RESTAPIPort=" in content:
             content = re.sub(r"RESTAPIPort=\d+", f"RESTAPIPort={REST_PORT}", content)
-        elif "OptionSettings=(" in content:
+            modified = True
+        else:
             content = content.replace("OptionSettings=(", f"OptionSettings=(RESTAPIPort={REST_PORT},")
             modified = True
 
+        # 3. bUseAuth (Must be False on ARM64/FEX to prevent Steam ticket failure / connection timeouts)
+        auth_bool = is_truthy(os.getenv("USE_AUTH", "false"))
+        auth_str = "True" if auth_bool else "False"
+        if "bUseAuth=" in content:
+            if f"bUseAuth={auth_str}" not in content:
+                content = re.sub(r"bUseAuth=\w+", f"bUseAuth={auth_str}", content)
+                modified = True
+        else:
+            content = content.replace("OptionSettings=(", f"OptionSettings=(bUseAuth={auth_str},")
+            modified = True
+
+        # 4. PublicPort (Ensure game port matches primary allocation)
+        game_port = os.getenv("SERVER_PORT", "25565")
+        if "PublicPort=" in content:
+            if f"PublicPort={game_port}" not in content:
+                content = re.sub(r"PublicPort=\d+", f"PublicPort={game_port}", content)
+                modified = True
+        else:
+            content = content.replace("OptionSettings=(", f"OptionSettings=(PublicPort={game_port},")
+            modified = True
+
+        # 5. AdminPassword
         if ADMIN_PASSWORD and ADMIN_PASSWORD != "change-me-now":
             if 'AdminPassword=' in content:
                 content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', content)
                 modified = True
 
         if modified:
-            with open(ini_path, "w", encoding="utf-8") as f:
+            with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            print("[BOOT] Ensured REST API options in PalWorldSettings.ini", flush=True)
+            print(f"[BOOT] Enforced settings in {os.path.basename(file_path)} (REST API=True, port={game_port}, bUseAuth={auth_str})", flush=True)
+            return True
+        return False
     except Exception as e:
-        print(f"[BOOT] Warning: Could not verify PalWorldSettings.ini: {e}", flush=True)
+        print(f"[BOOT] Warning: Could not configure {file_path}: {e}", flush=True)
+        return False
+
+
+def enforce_all_ini_files():
+    """
+    Applies critical network and REST settings to DefaultPalWorldSettings.ini,
+    PalWorldSettings.ini, and user backup so neither defaults nor user backups break connectivity.
+    """
+    default_ini = os.path.join(SERVER_ROOT, "DefaultPalWorldSettings.ini")
+    server_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
+    bak_ini = os.path.join(SERVER_ROOT, "tmp", "PalWorldSettings.ini.userbak")
+
+    configure_palworld_ini(default_ini)
+    configure_palworld_ini(server_ini)
+    configure_palworld_ini(bak_ini)
+
+
+def start_ini_enforcer_thread(duration: float = 60.0, interval: float = 1.0):
+    def _worker():
+        server_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
+        start_time = time.time()
+        while time.time() - start_time < duration:
+            if os.path.exists(server_ini):
+                configure_palworld_ini(server_ini)
+            time.sleep(interval)
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return t
+
+
+def detect_game_version() -> str:
+    """
+    Detects the installed Palworld version from files, manifests, or defaults to current release.
+    """
+    cache_file = os.path.join(SERVER_ROOT, "tmp", "palworld_version.txt")
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                v = f.read().strip()
+                if v:
+                    return v
+        except Exception:
+            pass
+
+    bin_path = os.path.join(SERVER_ROOT, "Pal", "Binaries", "Linux", "PalServer-Linux-Shipping")
+    if os.path.exists(bin_path):
+        try:
+            with open(bin_path, "rb") as f:
+                chunk = f.read(8 * 1024 * 1024)
+                matches = re.findall(rb"(?:v)?(1\.0\.\d+\.\d+|0\.\d+\.\d+\.\d+)", chunk)
+                if matches:
+                    return matches[-1].decode("ascii", errors="ignore")
+        except Exception:
+            pass
+
+    return "1.0.4.102642"
+
+
+def start_version_and_readiness_reporter():
+    """
+    Polls the REST API once the server starts.
+    When ready, prints the exact game version and announces connection readiness.
+    """
+    game_port = os.getenv("SERVER_PORT", "25565")
+    def _worker():
+        time.sleep(4)
+        announced = False
+        for _ in range(60):
+            try:
+                success, data = api_request("/info")
+                if success and isinstance(data, dict):
+                    ver = data.get("version", "").strip()
+                    server_name = data.get("servername", "").strip()
+                    if ver and not announced:
+                        try:
+                            v_file = os.path.join(SERVER_ROOT, "tmp", "palworld_version.txt")
+                            with open(v_file, "w") as f:
+                                f.write(ver)
+                        except Exception:
+                            pass
+                        print(f"Game version is {ver}", flush=True)
+                        print(f"[PALWORLD] Servidor pronto para conexões na porta {game_port}! Versão: {ver}", flush=True)
+                        announced = True
+                        break
+            except Exception:
+                pass
+            time.sleep(2)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    return t
 
 
 # --- Manager Process ---
@@ -312,8 +435,8 @@ class ManagerWrapper:
                 )):
                     continue
 
-            # Apply suppression patterns if quiet monitoring is enabled
-            if QUIET_MONITORING and log_filter:
+            # Apply suppression patterns unless raw logs explicitly requested
+            if (QUIET_MONITORING or CONSOLE_LANG != "raw") and log_filter:
                 suppress = False
                 for pat in log_filter.SUPPRESS_PATTERNS:
                     if pat.search(line):
@@ -323,6 +446,8 @@ class ManagerWrapper:
                     continue
 
             formatted = log_filter.format_line(line) if log_filter else line
+            if not formatted:
+                continue
             if formatted == last_printed:
                 continue
             last_printed = formatted
@@ -539,6 +664,19 @@ if __name__ == "__main__":
 
     # 1.5 Fix steamclient.so
     fix_steamclient()
+
+    # 1.6 Configure and enforce INI settings (REST API, port, bUseAuth)
+    enforce_all_ini_files()
+
+    # 1.7 Announce installed game version immediately
+    installed_ver = detect_game_version()
+    print(f"Game version is {installed_ver}", flush=True)
+
+    # 1.8 Start background INI enforcer to intercept manager generation
+    start_ini_enforcer_thread()
+
+    # 1.9 Start readiness and version confirmation reporter
+    start_version_and_readiness_reporter()
 
     # 2. Start Manager
     wrapper.start(sys.argv[1:])

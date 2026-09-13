@@ -62,6 +62,40 @@ class PteroManagerTests(unittest.TestCase):
         for line in lines:
             matched = any(p.search(line) for p in log_filter.SUPPRESS_PATTERNS)
             self.assertTrue(matched, f"Expected line to be suppressed: {line}")
+            formatted = log_filter.format_line(line)
+            self.assertEqual(formatted, "", f"Expected format_line to return empty string for: {line}")
+
+    def test_configure_palworld_ini(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_ini = Path(tmpdir) / "PalWorldSettings.ini"
+            test_ini.write_text("[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(Difficulty=None,ServerName=\"TestServer\",PublicPort=8211,bUseAuth=True)\n", encoding="utf-8")
+            
+            old_env = os.environ.copy()
+            try:
+                os.environ["SERVER_PORT"] = "25565"
+                os.environ["USE_AUTH"] = "false"
+                modified = ptero_manager.configure_palworld_ini(str(test_ini))
+                self.assertTrue(modified)
+                
+                content = test_ini.read_text(encoding="utf-8")
+                self.assertIn("bIsUseRestAPI=True", content)
+                self.assertIn("RESTAPIPort=8212", content)
+                self.assertIn("bUseAuth=False", content)
+                self.assertIn("PublicPort=25565", content)
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+    def test_version_and_readiness_format(self):
+        v_line = "Game version is 1.0.4.102642"
+        f_v = log_filter.format_line(v_line)
+        self.assertIn("1.0.4.102642", f_v)
+        self.assertIn("[VERSÃO]", f_v)
+
+        r_line = "[PALWORLD] Servidor pronto para conexões na porta 25565! Versão: 1.0.4.102642"
+        f_r = log_filter.format_line(r_line)
+        self.assertIn("[PRONTO]", f_r)
+        self.assertIn("25565", f_r)
 
 if __name__ == "__main__":
     unittest.main()
