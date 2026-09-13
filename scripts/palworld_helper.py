@@ -41,6 +41,8 @@ PRESERVE_CUSTOM_SETTINGS = os.getenv("PRESERVE_CUSTOM_SETTINGS", "true").lower()
 
 BASE_URL = f"http://{REST_HOST}:{REST_PORT}/v1/api"
 
+import re
+
 def preserve_user_ini():
     if not PRESERVE_CUSTOM_SETTINGS:
         return
@@ -56,6 +58,21 @@ def preserve_user_ini():
                 custom_content = f_bak.read()
 
             if custom_content.strip():
+                # Ensure essential runtime API options are not disabled by older backup files
+                if "bIsUseRestAPI=" in custom_content:
+                    custom_content = re.sub(r"bIsUseRestAPI=\w+", "bIsUseRestAPI=True", custom_content)
+                elif "OptionSettings=(" in custom_content:
+                    custom_content = custom_content.replace("OptionSettings=(", "OptionSettings=(bIsUseRestAPI=True,")
+
+                if "RESTAPIPort=" in custom_content:
+                    custom_content = re.sub(r"RESTAPIPort=\d+", f"RESTAPIPort={REST_PORT}", custom_content)
+                elif "OptionSettings=(" in custom_content:
+                    custom_content = custom_content.replace("OptionSettings=(", f"OptionSettings=(RESTAPIPort={REST_PORT},")
+
+                if ADMIN_PASSWORD and ADMIN_PASSWORD != "change-me-now":
+                    if 'AdminPassword=' in custom_content:
+                        custom_content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', custom_content)
+
                 with open(ini_path, "w", encoding="utf-8") as f_ini:
                     f_ini.write(custom_content)
                 print("[HELPER] 🛡️ [CONFIG] Edições manuais do arquivo PalWorldSettings.ini preservadas com sucesso!", flush=True)

@@ -114,6 +114,7 @@ configure_writable_environment() {
     export XDG_CACHE_HOME="${SERVER_ROOT}/.cache"
     export XDG_CONFIG_HOME="${SERVER_ROOT}/.config"
     export XDG_DATA_HOME="${SERVER_ROOT}/.local/share"
+    export XDG_RUNTIME_DIR="${SERVER_ROOT}/tmp"
     export TMPDIR="${SERVER_ROOT}/tmp"
 
     export SERVER_DIR="${SERVER_ROOT}"
@@ -207,8 +208,21 @@ print_runtime_summary() {
     local update_state="disabled"
     local mods_state="disabled"
     local safe_mode_state="no"
+    local force_marker="${SERVER_ROOT}/tmp/.force_update_next_boot"
+
     is_true "${USE_AUTH:-false}" && auth_state="enabled"
-    is_true "${UPDATE_ON_START:-true}" && update_state="enabled"
+
+    if [[ -f "${force_marker}" ]] || is_true "${UPDATE_ON_START:-}" || is_true "${AUTO_UPDATE:-}" || is_true "${FORCE_UPDATE:-}"; then
+        update_state="enabled"
+        export UPDATE_ON_START="true"
+    elif [[ -z "${UPDATE_ON_START:-}" && -z "${AUTO_UPDATE:-}" && -z "${FORCE_UPDATE:-}" ]]; then
+        update_state="enabled"
+        export UPDATE_ON_START="true"
+    else
+        update_state="disabled"
+        export UPDATE_ON_START="false"
+    fi
+
     is_true "${MODS_ENABLED:-false}" && mods_state="enabled"
     is_true "${MODS_SAFE_MODE:-false}" && safe_mode_state="yes"
 

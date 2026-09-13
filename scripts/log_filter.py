@@ -44,6 +44,9 @@ SUPPRESS_PATTERNS = [
     re.compile(r"Verifying server process startup\.\.\."),
     re.compile(r"Checking process stability for 10 seconds\.\.\."),
     re.compile(r"Cleared only user-added callbacks"),
+    re.compile(r"API returned None"),
+    re.compile(r"Monitoring cycle took \d+ms - performance issue detected"),
+    re.compile(r"API call failed: None"),
 ]
 
 # Portuguese Translation & Transformation Rules

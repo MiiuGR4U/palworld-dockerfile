@@ -17,8 +17,6 @@ from datetime import datetime
 
 # Environment Variables
 SERVER_ROOT = os.getenv("SERVER_ROOT", "/home/container")
-UPDATE_ON_START = os.getenv("UPDATE_ON_START", "true").lower() == "true"
-BACKUP_BEFORE_UPDATE = os.getenv("BACKUP_BEFORE_UPDATE", "true").lower() == "true"
 GRACEFUL_SHUTDOWN_TIMEOUT = int(os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT", "120"))
 
 REST_PORT = os.getenv("REST_API_PORT", "8212")
@@ -27,6 +25,42 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "change-me-now")
 BASE_URL = f"http://{REST_HOST}:{REST_PORT}/v1/api"
 
 import base64
+
+def is_truthy(val) -> bool:
+    if val is None:
+        return False
+    return str(val).strip().lower() in ("true", "1", "yes", "on")
+
+def check_update_enabled() -> bool:
+    force_file = os.path.join(SERVER_ROOT, "tmp", ".force_update_next_boot")
+    if os.path.exists(force_file):
+        try:
+            os.remove(force_file)
+        except OSError:
+            pass
+        print("[UPDATE] Force update marker detected (.force_update_next_boot). Updating Palworld...", flush=True)
+        return True
+
+    if is_truthy(os.getenv("FORCE_UPDATE")):
+        return True
+    if is_truthy(os.getenv("AUTO_UPDATE")):
+        return True
+    if os.getenv("UPDATE_ON_START") is not None:
+        return is_truthy(os.getenv("UPDATE_ON_START"))
+    return True
+
+UPDATE_ON_START = check_update_enabled()
+BACKUP_BEFORE_UPDATE = is_truthy(os.getenv("BACKUP_BEFORE_UPDATE", "true"))
+QUIET_MONITORING = is_truthy(os.getenv("QUIET_MONITORING", "true"))
+
+try:
+    import log_filter
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import log_filter
+    except ImportError:
+        log_filter = None
 
 # --- API Integration ---
 def get_auth_header() -> dict:
@@ -73,31 +107,107 @@ def backup_before_update():
 
 def run_steamcmd_update():
     print("[UPDATE] Checking Palworld server version...", flush=True)
-    print(f"[UPDATE] SteamCMD installation: {SERVER_ROOT}", flush=True)
+    print(f"[UPDATE] Target installation: {SERVER_ROOT}", flush=True)
     print("[UPDATE] AppID: 2394010", flush=True)
 
     backup_before_update()
 
+    depot_downloader = "/opt/depotdownloader/DepotDownloader"
+    beta_id = os.getenv("SRCDS_BETAID", "").strip()
+    beta_pass = os.getenv("SRCDS_BETAPASS", "").strip()
+
+    # 1. Prefer native ARM64 DepotDownloader (direct, zero emulation, guaranteed to download Palworld binaries)
+    if os.path.exists(depot_downloader) and os.access(depot_downloader, os.X_OK):
+        cmd = [
+            depot_downloader,
+            "-app", "2394010",
+            "-os", "linux",
+            "-osarch", "64",
+            "-dir", SERVER_ROOT
+        ]
+        if is_truthy(os.getenv("STEAMCMD_VALIDATE", "true")):
+            cmd.append("-validate")
+        if beta_id:
+            cmd.extend(["-branch", beta_id])
+        if beta_pass:
+            cmd.extend(["-branchpassword", beta_pass])
+
+        print("[UPDATE] Running native ARM64 DepotDownloader...", flush=True)
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            last_progress_time = 0.0
+            if proc.stdout:
+                for line in proc.stdout:
+                    line_str = line.strip()
+                    if not line_str:
+                        continue
+                    if "%" in line_str:
+                        now = time.time()
+                        if now - last_progress_time >= 2.0:
+                            last_progress_time = now
+                            print(f"[UPDATER] {line_str}", flush=True)
+                    else:
+                        print(f"[UPDATER] {line_str}", flush=True)
+            proc.wait()
+            if proc.returncode == 0:
+                print("[UPDATE] Palworld files updated successfully via native updater.", flush=True)
+                return
+            else:
+                print(f"[UPDATE] DepotDownloader returned code {proc.returncode}. Trying SteamCMD fallback...", flush=True)
+        except Exception as e:
+            print(f"[UPDATE] DepotDownloader failed: {e}. Trying SteamCMD fallback...", flush=True)
+
+    # 2. Fallback to SteamCMD under FEX
     steamcmd_sh = os.path.join(SERVER_ROOT, ".steamcmd", "steamcmd.sh")
     if not os.path.exists(steamcmd_sh):
         print(f"[UPDATE] SteamCMD not found at {steamcmd_sh}. Skipping update.", flush=True)
         return
 
-    cmd_str = f'"{steamcmd_sh}" +@sSteamCmdForcePlatformType linux +@sSteamCmdForcePlatformBitness 64 +force_install_dir "{SERVER_ROOT}" +login anonymous +app_update 2394010 validate +quit'
+    validate_arg = " validate" if is_truthy(os.getenv("STEAMCMD_VALIDATE", "true")) else ""
+    beta_arg = f" -beta {beta_id}" if beta_id else ""
+    if beta_arg and beta_pass:
+        beta_arg += f" -betapassword {beta_pass}"
+
+    cmd_str = f'"{steamcmd_sh}" +@sSteamCmdForcePlatformType linux +@sSteamCmdForcePlatformBitness 64 +force_install_dir "{SERVER_ROOT}" +login anonymous +app_update 2394010{beta_arg}{validate_arg} +quit'
     cmd = ["FEXBash", "-c", cmd_str]
 
-    print("[UPDATE] Running update... This may take a while.", flush=True)
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    
-    if result.returncode == 0:
-        if "Success! App '2394010' already up to date." in result.stdout:
-            print("[UPDATE] Server is already up to date.", flush=True)
+    print("[UPDATE] Running SteamCMD update in real-time...", flush=True)
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        last_progress_time = 0.0
+        if proc.stdout:
+            for line in proc.stdout:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                if "progress:" in line_str.lower():
+                    now = time.time()
+                    if now - last_progress_time >= 2.0:
+                        last_progress_time = now
+                        print(f"[STEAMCMD] {line_str}", flush=True)
+                else:
+                    print(f"[STEAMCMD] {line_str}", flush=True)
+        proc.wait()
+        if proc.returncode == 0:
+            print("[UPDATE] SteamCMD update completed successfully.", flush=True)
         else:
-            print("[UPDATE] Update completed successfully.", flush=True)
-    else:
-        print(f"[UPDATE] SteamCMD update failed with exit code {result.returncode}.", flush=True)
-        for line in result.stdout.splitlines()[-10:]:
-            print(f"[STEAMCMD] {line}", flush=True)
+            print(f"[UPDATE] SteamCMD update finished with exit code {proc.returncode}.", flush=True)
+    except Exception as e:
+        print(f"[UPDATE] SteamCMD update execution error: {e}", flush=True)
 
 
 def fix_steamclient():
@@ -132,16 +242,111 @@ def fix_steamclient():
         print(f"[BOOT] WARNING: Source steamclient.so not found at {source_client}", flush=True)
 
 
+def ensure_rest_api_in_ini():
+    ini_path = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
+    if not os.path.exists(ini_path):
+        return
+    try:
+        with open(ini_path, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        import re
+        modified = False
+        if "bIsUseRestAPI=" in content:
+            if "bIsUseRestAPI=True" not in content:
+                content = re.sub(r"bIsUseRestAPI=\w+", "bIsUseRestAPI=True", content)
+                modified = True
+        elif "OptionSettings=(" in content:
+            content = content.replace("OptionSettings=(", "OptionSettings=(bIsUseRestAPI=True,")
+            modified = True
+
+        if "RESTAPIPort=" in content:
+            content = re.sub(r"RESTAPIPort=\d+", f"RESTAPIPort={REST_PORT}", content)
+        elif "OptionSettings=(" in content:
+            content = content.replace("OptionSettings=(", f"OptionSettings=(RESTAPIPort={REST_PORT},")
+            modified = True
+
+        if ADMIN_PASSWORD and ADMIN_PASSWORD != "change-me-now":
+            if 'AdminPassword=' in content:
+                content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', content)
+                modified = True
+
+        if modified:
+            with open(ini_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("[BOOT] Ensured REST API options in PalWorldSettings.ini", flush=True)
+    except Exception as e:
+        print(f"[BOOT] Warning: Could not verify PalWorldSettings.ini: {e}", flush=True)
+
+
 # --- Manager Process ---
 class ManagerWrapper:
     def __init__(self):
         self.process = None
         self.shutdown_requested = False
+        self.output_thread = None
+
+    def _stream_output(self):
+        last_printed = None
+        if not self.process or not self.process.stdout:
+            return
+
+        for raw_line in self.process.stdout:
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # When shutdown was requested, suppress noisy asyncio / Python tracebacks
+            if self.shutdown_requested:
+                if any(tb_token in line for tb_token in (
+                    "Traceback (most recent call last):",
+                    "asyncio.exceptions.CancelledError",
+                    "KeyboardInterrupt",
+                    "_run_module_as_main",
+                    "run_until_complete",
+                    "return await future",
+                    "wait_for_api_ready",
+                    'File "/app/src/server_manager.py"',
+                    "raise KeyboardInterrupt()",
+                    "return future.result()"
+                )):
+                    continue
+
+            # Apply suppression patterns if quiet monitoring is enabled
+            if QUIET_MONITORING and log_filter:
+                suppress = False
+                for pat in log_filter.SUPPRESS_PATTERNS:
+                    if pat.search(line):
+                        suppress = True
+                        break
+                if suppress:
+                    continue
+
+            formatted = log_filter.format_line(line) if log_filter else line
+            if formatted == last_printed:
+                continue
+            last_printed = formatted
+
+            print(formatted, flush=True)
+
+            # Ensure Pterodactyl startup.done matcher is satisfied as soon as the server reports ready
+            if "Server started successfully and is stable" in line:
+                print("Palworld server started successfully!", flush=True)
 
     def start(self, args):
         print("[BOOT] Starting upstream manager (src.server_manager)...", flush=True)
         cmd = ["python", "-u", "-m", "src.server_manager"] + args
-        self.process = subprocess.Popen(cmd, cwd="/app")
+        self.process = subprocess.Popen(
+            cmd,
+            cwd="/app",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        self.output_thread = threading.Thread(target=self._stream_output, daemon=True)
+        self.output_thread.start()
 
     def shutdown(self):
         if self.shutdown_requested:
@@ -158,7 +363,10 @@ class ManagerWrapper:
             print("[SHUTDOWN] Save command sent successfully.", flush=True)
             time.sleep(3) # Wait for save to flush
         else:
-            print(f"[SHUTDOWN] Save command failed or REST API not available: {err}", flush=True)
+            if "Connection refused" in str(err) or "111" in str(err):
+                print("[SHUTDOWN] World save skipped (server was still initializing).", flush=True)
+            else:
+                print(f"[SHUTDOWN] Save command failed: {err}", flush=True)
 
         # 2. Send SIGINT to upstream manager
         if self.process and self.process.poll() is None:
@@ -173,6 +381,9 @@ class ManagerWrapper:
                 print(f"[SHUTDOWN] Timeout ({GRACEFUL_SHUTDOWN_TIMEOUT}s) reached! Forcing KILL.", flush=True)
                 self.process.kill()
                 self.process.wait()
+
+        if self.output_thread and self.output_thread.is_alive():
+            self.output_thread.join(timeout=1)
         
         print("[SHUTDOWN] Cleaning up and exiting. Shutdown complete.", flush=True)
         sys.exit(0)
@@ -296,9 +507,16 @@ def command_router(manager_wrapper):
 
         elif cmd == "/update":
             if len(args) > 0 and args[0] == "now":
-                print("[CONSOLE] Manual update requested. Shutting down server...", flush=True)
+                print("[CONSOLE] Manual update requested.", flush=True)
+                force_file = os.path.join(SERVER_ROOT, "tmp", ".force_update_next_boot")
+                try:
+                    os.makedirs(os.path.dirname(force_file), exist_ok=True)
+                    with open(force_file, "w") as f:
+                        f.write("1")
+                except Exception as e:
+                    print(f"[UPDATE] Warning: Failed to set force update marker: {e}", flush=True)
+                print("[CONSOLE] Server marked to update Palworld on next boot. Shutting down gracefully...", flush=True)
                 manager_wrapper.shutdown()
-                # Pterodactyl will detect exit and restart (or user has to manually start).
             else:
                 print("Usage: /update now", flush=True)
                 
@@ -336,5 +554,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         wrapper.shutdown()
     
+    if wrapper.output_thread and wrapper.output_thread.is_alive():
+        wrapper.output_thread.join(timeout=2)
+
     print("[WATCHDOG] Upstream manager process exited.", flush=True)
-    sys.exit(wrapper.process.returncode)
+    sys.exit(wrapper.process.returncode if wrapper.process else 0)
