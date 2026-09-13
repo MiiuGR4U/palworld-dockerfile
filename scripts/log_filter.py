@@ -50,6 +50,7 @@ SUPPRESS_PATTERNS = [
     re.compile(r"Monitoring cycle took \d+ms"),
     re.compile(r"Idle restart monitoring is disabled"),
     re.compile(r"API call failed: None"),
+    re.compile(r"^\[BOOT\] Enforced settings in PalWorldSettings\.ini"),
 ]
 
 # Portuguese Translation & Transformation Rules
@@ -141,6 +142,14 @@ TRANSFORM_RULES_PT = [
     (
         re.compile(r"\[PALWORLD\] Servidor pronto para conexões na porta (\d+)! Versão: (.*)"),
         f"{C_GREEN}🎮 [PRONTO]{C_RESET} {C_BOLD}Servidor pronto para conexões na porta \\1! Versão: {C_CYAN}\\2{C_RESET}"
+    ),
+    (
+        re.compile(r"\[CONFIG\] Servidor já atualizado\. Configurações personalizadas preservadas com sucesso!"),
+        f"{C_GREEN}🛡️ [CONFIG]{C_RESET} {C_BOLD}Servidor já atualizado. Configurações personalizadas preservadas intactas!{C_RESET}"
+    ),
+    (
+        re.compile(r"\[CONFIG\] Atualização aplicada\. Configurações atualizadas para a nova versão!"),
+        f"{C_CYAN}⚙️ [CONFIG]{C_RESET} {C_BOLD}Atualização concluída. Configurações adaptadas para a nova versão!{C_RESET}"
     ),
 ]
 

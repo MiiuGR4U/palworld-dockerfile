@@ -97,5 +97,48 @@ class PteroManagerTests(unittest.TestCase):
         self.assertIn("[PRONTO]", f_r)
         self.assertIn("25565", f_r)
 
+    def test_no_duplicate_modifications_in_configure_ini(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_ini = Path(tmpdir) / "PalWorldSettings.ini"
+            test_ini.write_text("[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(Difficulty=None,bIsUseRestAPI=True,RESTAPIPort=8212,bUseAuth=False,PublicPort=25565)\n", encoding="utf-8")
+            
+            old_env = os.environ.copy()
+            try:
+                os.environ["SERVER_PORT"] = "25565"
+                os.environ["USE_AUTH"] = "false"
+                # First run on already-compliant file should NOT modify
+                modified = ptero_manager.configure_palworld_ini(str(test_ini), log_action=False)
+                self.assertFalse(modified, "Should not modify file if settings are already compliant")
+            finally:
+                os.environ.clear()
+                os.environ.update(old_env)
+
+    def test_handle_post_config_generation_preserves_custom_settings_when_not_updated(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            saved_server_root = ptero_manager.SERVER_ROOT
+            try:
+                ptero_manager.SERVER_ROOT = tmpdir
+                ptero_manager.UPDATE_ACTUALLY_DOWNLOADED = False
+
+                saved_dir = Path(tmpdir) / "Pal" / "Saved" / "Config" / "LinuxServer"
+                saved_dir.mkdir(parents=True, exist_ok=True)
+                tmp_dir = Path(tmpdir) / "tmp"
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+
+                preboot_ini = tmp_dir / "PalWorldSettings.ini.preboot"
+                preboot_ini.write_text("[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(ExpRate=5.000000,PalSpawnNumRate=3.000000,bIsUseRestAPI=True,RESTAPIPort=8212,bUseAuth=False,PublicPort=25565)\n", encoding="utf-8")
+
+                active_ini = saved_dir / "PalWorldSettings.ini"
+                # Upstream manager reset it to defaults (ExpRate=1.0)
+                active_ini.write_text("[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(ExpRate=1.000000,PalSpawnNumRate=1.000000)\n", encoding="utf-8")
+
+                ptero_manager.handle_post_config_generation()
+
+                content = active_ini.read_text(encoding="utf-8")
+                self.assertIn("ExpRate=5.000000", content, "Custom ExpRate must be restored")
+                self.assertIn("PalSpawnNumRate=3.000000", content, "Custom PalSpawnNumRate must be restored")
+            finally:
+                ptero_manager.SERVER_ROOT = saved_server_root
+
 if __name__ == "__main__":
     unittest.main()

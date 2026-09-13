@@ -52,6 +52,7 @@ def check_update_enabled() -> bool:
     return True
 
 UPDATE_ON_START = check_update_enabled()
+UPDATE_ACTUALLY_DOWNLOADED = False
 BACKUP_BEFORE_UPDATE = is_truthy(os.getenv("BACKUP_BEFORE_UPDATE", "true"))
 _qm = os.getenv("QUIET_MONITORING")
 QUIET_MONITORING = True if _qm is None or _qm.strip() == "" else is_truthy(_qm)
@@ -108,7 +109,7 @@ def backup_before_update():
     except Exception as e:
         print(f"[UPDATE] WARNING: Backup failed: {e}", flush=True)
 
-def run_steamcmd_update():
+def run_steamcmd_update() -> bool:
     print("[UPDATE] Checking Palworld server version...", flush=True)
     print(f"[UPDATE] Target installation: {SERVER_ROOT}", flush=True)
     print("[UPDATE] AppID: 2394010", flush=True)
@@ -118,6 +119,7 @@ def run_steamcmd_update():
     depot_downloader = "/opt/depotdownloader/DepotDownloader"
     beta_id = os.getenv("SRCDS_BETAID", "").strip()
     beta_pass = os.getenv("SRCDS_BETAPASS", "").strip()
+    downloaded_any_bytes = False
 
     # 1. Prefer native ARM64 DepotDownloader (direct, zero emulation, guaranteed to download Palworld binaries)
     if os.path.exists(depot_downloader) and os.access(depot_downloader, os.X_OK):
@@ -151,6 +153,15 @@ def run_steamcmd_update():
                     line_str = line.strip()
                     if not line_str:
                         continue
+                    if "Total downloaded:" in line_str:
+                        m = re.search(r"Total downloaded:\s*(\d+)\s*bytes", line_str)
+                        if m and int(m.group(1)) > 0:
+                            downloaded_any_bytes = True
+                    elif "Downloaded" in line_str and "bytes" in line_str:
+                        m = re.search(r"Downloaded\s+(\d+)\s+bytes", line_str)
+                        if m and int(m.group(1)) > 0:
+                            downloaded_any_bytes = True
+
                     if "%" in line_str:
                         now = time.time()
                         if now - last_progress_time >= 2.0:
@@ -160,8 +171,11 @@ def run_steamcmd_update():
                         print(f"[UPDATER] {line_str}", flush=True)
             proc.wait()
             if proc.returncode == 0:
-                print("[UPDATE] Palworld files updated successfully via native updater.", flush=True)
-                return
+                if downloaded_any_bytes:
+                    print("[UPDATE] Palworld files updated successfully via native updater.", flush=True)
+                else:
+                    print("[UPDATE] Palworld server files are already up-to-date (0 bytes downloaded).", flush=True)
+                return downloaded_any_bytes
             else:
                 print(f"[UPDATE] DepotDownloader returned code {proc.returncode}. Trying SteamCMD fallback...", flush=True)
         except Exception as e:
@@ -171,7 +185,7 @@ def run_steamcmd_update():
     steamcmd_sh = os.path.join(SERVER_ROOT, ".steamcmd", "steamcmd.sh")
     if not os.path.exists(steamcmd_sh):
         print(f"[UPDATE] SteamCMD not found at {steamcmd_sh}. Skipping update.", flush=True)
-        return
+        return False
 
     validate_arg = " validate" if is_truthy(os.getenv("STEAMCMD_VALIDATE", "true")) else ""
     beta_arg = f" -beta {beta_id}" if beta_id else ""
@@ -192,11 +206,14 @@ def run_steamcmd_update():
             universal_newlines=True
         )
         last_progress_time = 0.0
+        steamcmd_updated = False
         if proc.stdout:
             for line in proc.stdout:
                 line_str = line.strip()
                 if not line_str:
                     continue
+                if "success! app '2394010' fully installed" in line_str.lower():
+                    steamcmd_updated = True
                 if "progress:" in line_str.lower():
                     now = time.time()
                     if now - last_progress_time >= 2.0:
@@ -207,10 +224,13 @@ def run_steamcmd_update():
         proc.wait()
         if proc.returncode == 0:
             print("[UPDATE] SteamCMD update completed successfully.", flush=True)
+            return steamcmd_updated
         else:
             print(f"[UPDATE] SteamCMD update finished with exit code {proc.returncode}.", flush=True)
+            return False
     except Exception as e:
         print(f"[UPDATE] SteamCMD update execution error: {e}", flush=True)
+        return False
 
 
 def fix_steamclient():
@@ -245,7 +265,7 @@ def fix_steamclient():
         print(f"[BOOT] WARNING: Source steamclient.so not found at {source_client}", flush=True)
 
 
-def configure_palworld_ini(file_path: str) -> bool:
+def configure_palworld_ini(file_path: str, log_action: bool = True) -> bool:
     if not os.path.exists(file_path):
         return False
     try:
@@ -268,8 +288,9 @@ def configure_palworld_ini(file_path: str) -> bool:
 
         # 2. RESTAPIPort
         if "RESTAPIPort=" in content:
-            content = re.sub(r"RESTAPIPort=\d+", f"RESTAPIPort={REST_PORT}", content)
-            modified = True
+            if f"RESTAPIPort={REST_PORT}" not in content:
+                content = re.sub(r"RESTAPIPort=\d+", f"RESTAPIPort={REST_PORT}", content)
+                modified = True
         else:
             content = content.replace("OptionSettings=(", f"OptionSettings=(RESTAPIPort={REST_PORT},")
             modified = True
@@ -297,46 +318,58 @@ def configure_palworld_ini(file_path: str) -> bool:
 
         # 5. AdminPassword
         if ADMIN_PASSWORD and ADMIN_PASSWORD != "change-me-now":
-            if 'AdminPassword=' in content:
-                content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', content)
-                modified = True
+            if f'AdminPassword="{ADMIN_PASSWORD}"' not in content:
+                if 'AdminPassword=' in content:
+                    content = re.sub(r'AdminPassword="[^"]*"', f'AdminPassword="{ADMIN_PASSWORD}"', content)
+                    modified = True
 
         if modified:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            print(f"[BOOT] Enforced settings in {os.path.basename(file_path)} (REST API=True, port={game_port}, bUseAuth={auth_str})", flush=True)
+            if log_action:
+                print(f"[BOOT] Enforced settings in {os.path.basename(file_path)} (REST API=True, port={game_port}, bUseAuth={auth_str})", flush=True)
             return True
         return False
     except Exception as e:
-        print(f"[BOOT] Warning: Could not configure {file_path}: {e}", flush=True)
+        if log_action:
+            print(f"[BOOT] Warning: Could not configure {file_path}: {e}", flush=True)
         return False
 
 
 def enforce_all_ini_files():
     """
-    Applies critical network and REST settings to DefaultPalWorldSettings.ini,
-    PalWorldSettings.ini, and user backup so neither defaults nor user backups break connectivity.
+    Applies critical network and REST settings quietly to default and backup templates.
     """
     default_ini = os.path.join(SERVER_ROOT, "DefaultPalWorldSettings.ini")
     server_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
     bak_ini = os.path.join(SERVER_ROOT, "tmp", "PalWorldSettings.ini.userbak")
 
-    configure_palworld_ini(default_ini)
-    configure_palworld_ini(server_ini)
-    configure_palworld_ini(bak_ini)
+    configure_palworld_ini(default_ini, log_action=False)
+    configure_palworld_ini(server_ini, log_action=False)
+    configure_palworld_ini(bak_ini, log_action=False)
 
 
-def start_ini_enforcer_thread(duration: float = 60.0, interval: float = 1.0):
-    def _worker():
-        server_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
-        start_time = time.time()
-        while time.time() - start_time < duration:
-            if os.path.exists(server_ini):
-                configure_palworld_ini(server_ini)
-            time.sleep(interval)
-    t = threading.Thread(target=_worker, daemon=True)
-    t.start()
-    return t
+def handle_post_config_generation():
+    """
+    Called the exact moment upstream manager finishes generating PalWorldSettings.ini.
+    If no new game files were downloaded, restores user's custom settings instead of resetting to defaults.
+    """
+    global UPDATE_ACTUALLY_DOWNLOADED
+    active_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
+    preboot_ini = os.path.join(SERVER_ROOT, "tmp", "PalWorldSettings.ini.preboot")
+
+    if not UPDATE_ACTUALLY_DOWNLOADED and os.path.exists(preboot_ini) and os.path.getsize(preboot_ini) > 0:
+        try:
+            shutil.copy2(preboot_ini, active_ini)
+            configure_palworld_ini(active_ini, log_action=False)
+            print("[CONFIG] Servidor já atualizado. Configurações personalizadas preservadas com sucesso!", flush=True)
+        except Exception as e:
+            print(f"[CONFIG] Aviso ao restaurar configurações personalizadas: {e}", flush=True)
+    else:
+        # An actual update was downloaded or fresh install: ensure critical settings
+        configure_palworld_ini(active_ini, log_action=False)
+        if UPDATE_ACTUALLY_DOWNLOADED:
+            print("[CONFIG] Atualização aplicada. Configurações atualizadas para a nova versão!", flush=True)
 
 
 def detect_game_version() -> str:
@@ -453,6 +486,14 @@ class ManagerWrapper:
             last_printed = formatted
 
             print(formatted, flush=True)
+
+            # Intercept upstream config generation: preserve custom settings if no update occurred!
+            if any(marker in line for marker in (
+                "Configurações de jogo (PalWorldSettings.ini) aplicadas com sucesso",
+                "PalWorldSettings.ini file generated successfully",
+                "Server settings file generated successfully"
+            )):
+                handle_post_config_generation()
 
             # Ensure Pterodactyl startup.done matcher is satisfied as soon as the server reports ready
             if "Server started successfully and is stable" in line:
@@ -658,9 +699,19 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, lambda s, f: wrapper.shutdown())
     signal.signal(signal.SIGINT, lambda s, f: wrapper.shutdown())
 
+    # 0. Backup preboot settings to protect custom configs if server is already updated
+    active_ini = os.path.join(SERVER_ROOT, "Pal", "Saved", "Config", "LinuxServer", "PalWorldSettings.ini")
+    preboot_ini = os.path.join(SERVER_ROOT, "tmp", "PalWorldSettings.ini.preboot")
+    if os.path.exists(active_ini) and os.path.getsize(active_ini) > 0:
+        try:
+            os.makedirs(os.path.dirname(preboot_ini), exist_ok=True)
+            shutil.copy2(active_ini, preboot_ini)
+        except Exception:
+            pass
+
     # 1. Update Phase
     if UPDATE_ON_START:
-        run_steamcmd_update()
+        UPDATE_ACTUALLY_DOWNLOADED = run_steamcmd_update()
 
     # 1.5 Fix steamclient.so
     fix_steamclient()
@@ -672,10 +723,7 @@ if __name__ == "__main__":
     installed_ver = detect_game_version()
     print(f"Game version is {installed_ver}", flush=True)
 
-    # 1.8 Start background INI enforcer to intercept manager generation
-    start_ini_enforcer_thread()
-
-    # 1.9 Start readiness and version confirmation reporter
+    # 1.8 Start readiness and version confirmation reporter
     start_version_and_readiness_reporter()
 
     # 2. Start Manager
