@@ -51,6 +51,14 @@ SUPPRESS_PATTERNS = [
     re.compile(r"Idle restart monitoring is disabled"),
     re.compile(r"API call failed: None"),
     re.compile(r"^\[BOOT\] Enforced settings in PalWorldSettings\.ini"),
+    # Suppress Python exception tracebacks and asyncio cancellation artifacts during shutdown
+    re.compile(r"^Traceback \(most recent call last\):"),
+    re.compile(r"^During handling of the above exception, another exception occurred:"),
+    re.compile(r"^\s*File\s+\".*\",\s+line\s+\d+"),
+    re.compile(r"^[\^~\s|]*[\^~]+[\^~\s|]*$"),
+    re.compile(r"^(await\s+asyncio\.sleep|exit_code\s*=\s*asyncio\.run|return\s+runner\.run|return\s+await\s+future|run_until_complete)"),
+    re.compile(r"^(asyncio\.exceptions\.CancelledError|concurrent\.futures\._base\.CancelledError|CancelledError|KeyboardInterrupt)"),
+    re.compile(r"^(Task was destroyed but it is pending!|source_traceback: Object created at|Exception ignored in:)"),
 ]
 
 # Portuguese Translation & Transformation Rules
@@ -150,6 +158,14 @@ TRANSFORM_RULES_PT = [
     (
         re.compile(r"\[CONFIG\] Atualização aplicada\. Configurações atualizadas para a nova versão!"),
         f"{C_CYAN}⚙️ [CONFIG]{C_RESET} {C_BOLD}Atualização concluída. Configurações adaptadas para a nova versão!{C_RESET}"
+    ),
+    (
+        re.compile(r"Server stopped successfully"),
+        f"{C_GREEN}🛑 [FINALIZADO]{C_RESET} {C_BOLD}Servidor Palworld finalizado com sucesso.{C_RESET}"
+    ),
+    (
+        re.compile(r"Backup cleanup"),
+        f"{C_CYAN}🧹 [BACKUP]{C_RESET} Limpeza de backups temporários concluída."
     ),
 ]
 

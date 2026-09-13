@@ -140,5 +140,93 @@ class PteroManagerTests(unittest.TestCase):
             finally:
                 ptero_manager.SERVER_ROOT = saved_server_root
 
+    def test_traceback_and_asyncio_shutdown_suppressed(self):
+        user_traceback_lines = [
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run',
+            '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^',
+            '^^^^^^^^^^^^^^^',
+            'await asyncio.sleep(60)',
+            'File "/usr/lib/python3.12/asyncio/tasks.py", line 665, in sleep',
+            '^^^^^^^^^^^^',
+            'During handling of the above exception, another exception occurred:',
+            'File "<frozen runpy>", line 88, in _run_code',
+            'exit_code = asyncio.run(main())',
+            '^^^^^^^^^^^^^^^^^^^',
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run',
+            'return runner.run(main)',
+            '^^^^^^^^^^^^^^^^',
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 123, in run',
+            'KeyboardInterrupt',
+            'asyncio.exceptions.CancelledError',
+            'Traceback (most recent call last):',
+        ]
+        for line in user_traceback_lines:
+            self.assertTrue(
+                ptero_manager.is_traceback_line(line),
+                f"is_traceback_line must identify: {line}"
+            )
+            self.assertEqual(
+                log_filter.format_line(line),
+                "",
+                f"format_line must suppress: {line}"
+            )
+
+    def test_shutdown_messages_formatted_in_portuguese(self):
+        stop_line = "[INFO] 2026-09-13T19:09:30 Server stopped successfully"
+        formatted_stop = log_filter.format_line(stop_line)
+        self.assertIn("[FINALIZADO]", formatted_stop)
+        self.assertIn("Servidor Palworld finalizado com sucesso", formatted_stop)
+
+        backup_line = "[INFO] Backup cleanup"
+        formatted_backup = log_filter.format_line(backup_line)
+        self.assertIn("[BACKUP]", formatted_backup)
+        self.assertIn("Limpeza de backups temporários concluída", formatted_backup)
+
+    def test_stream_output_suppresses_tracebacks_cleanly(self):
+        import io
+        from unittest.mock import MagicMock
+
+        lines = [
+            "[INFO] 2026-09-13T19:09:30 Server stopped successfully\n",
+            "[INFO] Backup cleanup\n",
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 118, in run\n',
+            '^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n',
+            'await asyncio.sleep(60)\n',
+            'File "/usr/lib/python3.12/asyncio/tasks.py", line 665, in sleep\n',
+            '^^^^^^^^^^^^\n',
+            'During handling of the above exception, another exception occurred:\n',
+            'File "<frozen runpy>", line 88, in _run_code\n',
+            'exit_code = asyncio.run(main())\n',
+            '^^^^^^^^^^^^^^^^^^^\n',
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 194, in run\n',
+            'return runner.run(main)\n',
+            '^^^^^^^^^^^^^^^^\n',
+            'File "/usr/lib/python3.12/asyncio/runners.py", line 123, in run\n',
+            'KeyboardInterrupt\n',
+        ]
+
+        wrapper = ptero_manager.ManagerWrapper()
+        fake_process = MagicMock()
+        fake_process.stdout = lines
+        wrapper.process = fake_process
+
+        captured = io.StringIO()
+        old_stdout = sys.stdout
+        try:
+            sys.stdout = captured
+            wrapper._stream_output()
+        finally:
+            sys.stdout = old_stdout
+
+        output = captured.getvalue()
+        self.assertIn("FINALIZADO", output)
+        self.assertIn("BACKUP", output)
+        self.assertNotIn("runners.py", output)
+        self.assertNotIn("^^^^", output)
+        self.assertNotIn("asyncio.sleep", output)
+        self.assertNotIn("KeyboardInterrupt", output)
+        self.assertNotIn("During handling", output)
+        self.assertTrue(wrapper.shutdown_requested)
+
 if __name__ == "__main__":
     unittest.main()

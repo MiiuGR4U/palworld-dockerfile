@@ -435,12 +435,64 @@ def start_version_and_readiness_reporter():
     return t
 
 
+# --- Traceback & Noise Suppression ---
+def is_traceback_line(line: str) -> bool:
+    s = line.strip()
+    if not s:
+        return False
+
+    # Caret / underline lines from Python 3.11+: e.g. ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ or ~~~^^^~~~
+    if set(s) <= {'^', '~', ' ', '|', '\t'}:
+        return True
+
+    # Traceback header & exception chaining
+    if s.startswith("Traceback (most recent call last):") or \
+       s.startswith("During handling of the above exception"):
+        return True
+
+    # Python stack frame lines: File "...", line 123, in ...
+    if re.match(r'^File\s+"[^"]+",\s+line\s+\d+', s):
+        return True
+
+    # Asyncio / runpy / interpreter runtime frame expressions
+    tb_tokens = (
+        "asyncio.exceptions.CancelledError",
+        "concurrent.futures._base.CancelledError",
+        "asyncio.CancelledError",
+        "KeyboardInterrupt",
+        "exit_code = asyncio.run",
+        "await asyncio.sleep",
+        "return runner.run",
+        "return await future",
+        "run_until_complete",
+        "_run_module_as_main",
+        "_run_code",
+        "wait_for_api_ready",
+        "raise KeyboardInterrupt()",
+        "return future.result()",
+        "runner.run(main)",
+        "asyncio/runners.py",
+        "asyncio/tasks.py",
+        "asyncio/base_events.py",
+        "<frozen runpy>",
+        "<frozen importlib",
+        "self._sslobj.shutdown()",
+        "Task was destroyed but it is pending",
+        "source_traceback:",
+        "Exception ignored in:",
+        "loop.close()",
+    )
+    return any(token in s for token in tb_tokens)
+
+
 # --- Manager Process ---
 class ManagerWrapper:
     def __init__(self):
         self.process = None
         self.shutdown_requested = False
+        self._shutdown_executing = False
         self.output_thread = None
+        self.in_traceback = False
 
     def _stream_output(self):
         last_printed = None
@@ -452,21 +504,28 @@ class ManagerWrapper:
             if not line:
                 continue
 
-            # When shutdown was requested, suppress noisy asyncio / Python tracebacks
-            if self.shutdown_requested:
-                if any(tb_token in line for tb_token in (
-                    "Traceback (most recent call last):",
-                    "asyncio.exceptions.CancelledError",
-                    "KeyboardInterrupt",
-                    "_run_module_as_main",
-                    "run_until_complete",
-                    "return await future",
-                    "wait_for_api_ready",
-                    'File "/app/src/server_manager.py"',
-                    "raise KeyboardInterrupt()",
-                    "return future.result()"
-                )):
+            # Detect server shutdown from upstream logs
+            if "Server stopped successfully" in line or "Backup cleanup" in line:
+                self.shutdown_requested = True
+
+            # Track whether we entered a traceback block
+            if "Traceback (most recent call last):" in line or \
+               "During handling of the above exception" in line:
+                self.in_traceback = True
+
+            # When shutdown was requested or when in a traceback, suppress tracebacks and asyncio noise
+            if self.shutdown_requested or self.in_traceback or is_traceback_line(line):
+                if is_traceback_line(line):
+                    if any(exc in line for exc in ("KeyboardInterrupt", "CancelledError")):
+                        self.in_traceback = False
                     continue
+                if self.in_traceback:
+                    if line.startswith(("[", "🟢", "🎮", "✨", "👋", "🚀", "✅", "🛡️", "🌐", "⚙️", "🛠️", "📥", "✓", "👁️", "👥", "📊", "🔔", "💤", "📦", "🛑", "🧹")):
+                        self.in_traceback = False
+                    else:
+                        if any(exc in line for exc in ("KeyboardInterrupt", "CancelledError", "Error", "Exception")):
+                            self.in_traceback = False
+                        continue
 
             # Apply suppression patterns unless raw logs explicitly requested
             if (QUIET_MONITORING or CONSOLE_LANG != "raw") and log_filter:
@@ -515,10 +574,18 @@ class ManagerWrapper:
         self.output_thread.start()
 
     def shutdown(self):
-        if self.shutdown_requested:
+        if self._shutdown_executing:
             return
+        self._shutdown_executing = True
         self.shutdown_requested = True
         
+        # Ignore further interrupt signals so graceful shutdown is never aborted midway
+        try:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        except Exception:
+            pass
+
         print("\n[SHUTDOWN] Stop signal received", flush=True)
         print("[SHUTDOWN] Preparing graceful shutdown", flush=True)
         
@@ -549,7 +616,7 @@ class ManagerWrapper:
                 self.process.wait()
 
         if self.output_thread and self.output_thread.is_alive():
-            self.output_thread.join(timeout=1)
+            self.output_thread.join(timeout=2)
         
         print("[SHUTDOWN] Cleaning up and exiting. Shutdown complete.", flush=True)
         sys.exit(0)
@@ -600,96 +667,101 @@ def command_router(manager_wrapper):
     print("[CONSOLE] Interactive Command Router Started.", flush=True)
     print("[CONSOLE] Type /help for a list of commands.", flush=True)
     
-    for line in sys.stdin:
-        cmd_raw = line.strip()
-        if not cmd_raw:
-            continue
-        
-        print(f"[COMMAND] {cmd_raw}", flush=True)
-        
-        parts = cmd_raw.split(" ")
-        cmd = parts[0].lower()
-        args = parts[1:]
+    try:
+        for line in sys.stdin:
+            cmd_raw = line.strip()
+            if not cmd_raw:
+                continue
+            
+            print(f"[COMMAND] {cmd_raw}", flush=True)
+            
+            parts = cmd_raw.split(" ")
+            cmd = parts[0].lower()
+            args = parts[1:]
 
-        if cmd == "/help" or cmd == "/?":
-            print("## Internal Commands:", flush=True)
-            print(" /status, /info      - Show server health and status", flush=True)
-            print(" /save, /saveworld   - Force save the world", flush=True)
-            print(" /say, /broadcast    - Send a message to all players", flush=True)
-            print(" /players, /list     - List active players", flush=True)
-            print(" /stop               - Gracefully stop the server", flush=True)
-            print(" /update now         - Force update Palworld", flush=True)
-            print(" /memory             - Show RAM diagnostics", flush=True)
-            print(" /processes          - Show running processes", flush=True)
-        
-        elif cmd in ["/save", "/saveworld"]:
-            success, err = api_request("/save", method="POST")
-            if success:
-                print("[RCON] World saved successfully.", flush=True)
-            else:
-                print(f"[RCON] Save failed: {err}", flush=True)
-                
-        elif cmd in ["/say", "/broadcast"]:
-            msg = " ".join(args)
-            if not msg:
-                print("Usage: /say <message>", flush=True)
-            else:
-                success, err = api_request("/announce", method="POST", data={"message": msg})
+            if cmd in ["/help", "/?", "help"]:
+                print("## Internal Commands:", flush=True)
+                print(" /status, /info      - Show server health and status", flush=True)
+                print(" /save, /saveworld   - Force save the world", flush=True)
+                print(" /say, /broadcast    - Send a message to all players", flush=True)
+                print(" /players, /list     - List active players", flush=True)
+                print(" /stop               - Gracefully stop the server", flush=True)
+                print(" /update now         - Force update Palworld", flush=True)
+                print(" /memory             - Show RAM diagnostics", flush=True)
+                print(" /processes          - Show running processes", flush=True)
+            
+            elif cmd in ["/save", "/saveworld", "save", "saveworld"]:
+                success, err = api_request("/save", method="POST")
                 if success:
-                    print(f"[CHAT] Broadcast sent: {msg}", flush=True)
+                    print("[RCON] World saved successfully.", flush=True)
                 else:
-                    print(f"[RCON] Broadcast failed: {err}", flush=True)
+                    print(f"[RCON] Save failed: {err}", flush=True)
                     
-        elif cmd in ["/players", "/list"]:
-            success, data = api_request("/players")
-            if success:
-                players = data.get("players", [])
-                print(f"## Active Players ({len(players)}):", flush=True)
-                for p in players:
-                    name = p.get("name", "Unknown")
-                    pid = p.get("account_name", "Unknown")
-                    print(f"- {name} ({pid})", flush=True)
-            else:
-                print(f"[RCON] Failed to get players: {data}", flush=True)
-                
-        elif cmd in ["/status", "/info"]:
-            success, data = api_request("/info")
-            if success:
-                print(f"## Server Status", flush=True)
-                print(f"Version: {data.get('version', 'Unknown')}", flush=True)
-                print(f"Server Name: {data.get('servername', 'Unknown')}", flush=True)
-            else:
-                print("[RCON] Server is unreachable or starting up.", flush=True)
+            elif cmd in ["/say", "/broadcast"]:
+                msg = " ".join(args)
+                if not msg:
+                    print("Usage: /say <message>", flush=True)
+                else:
+                    success, err = api_request("/announce", method="POST", data={"message": msg})
+                    if success:
+                        print(f"[CHAT] Broadcast sent: {msg}", flush=True)
+                    else:
+                        print(f"[RCON] Broadcast failed: {err}", flush=True)
+                        
+            elif cmd in ["/players", "/list", "players", "list"]:
+                success, data = api_request("/players")
+                if success:
+                    players = data.get("players", [])
+                    print(f"## Active Players ({len(players)}):", flush=True)
+                    for p in players:
+                        name = p.get("name", "Unknown")
+                        pid = p.get("account_name", "Unknown")
+                        print(f"- {name} ({pid})", flush=True)
+                else:
+                    print(f"[RCON] Failed to get players: {data}", flush=True)
+                    
+            elif cmd in ["/status", "/info", "status", "info"]:
+                success, data = api_request("/info")
+                if success:
+                    print(f"## Server Status", flush=True)
+                    print(f"Version: {data.get('version', 'Unknown')}", flush=True)
+                    print(f"Server Name: {data.get('servername', 'Unknown')}", flush=True)
+                else:
+                    print("[RCON] Server is unreachable or starting up.", flush=True)
 
-        elif cmd == "/stop":
-            print("[CONSOLE] Manual stop requested.", flush=True)
-            manager_wrapper.shutdown()
-
-        elif cmd == "/memory":
-            get_memory_info()
-
-        elif cmd == "/processes":
-            os.system("ps -ef --forest")
-
-        elif cmd == "/update":
-            if len(args) > 0 and args[0] == "now":
-                print("[CONSOLE] Manual update requested.", flush=True)
-                force_file = os.path.join(SERVER_ROOT, "tmp", ".force_update_next_boot")
-                try:
-                    os.makedirs(os.path.dirname(force_file), exist_ok=True)
-                    with open(force_file, "w") as f:
-                        f.write("1")
-                except Exception as e:
-                    print(f"[UPDATE] Warning: Failed to set force update marker: {e}", flush=True)
-                print("[CONSOLE] Server marked to update Palworld on next boot. Shutting down gracefully...", flush=True)
+            elif cmd in ["/stop", "stop"]:
+                print("[CONSOLE] Manual stop requested.", flush=True)
                 manager_wrapper.shutdown()
+                break
+
+            elif cmd in ["/memory", "memory"]:
+                get_memory_info()
+
+            elif cmd in ["/processes", "processes"]:
+                os.system("ps -ef --forest")
+
+            elif cmd == "/update":
+                if len(args) > 0 and args[0] == "now":
+                    print("[CONSOLE] Manual update requested.", flush=True)
+                    force_file = os.path.join(SERVER_ROOT, "tmp", ".force_update_next_boot")
+                    try:
+                        os.makedirs(os.path.dirname(force_file), exist_ok=True)
+                        with open(force_file, "w") as f:
+                            f.write("1")
+                    except Exception as e:
+                        print(f"[UPDATE] Warning: Failed to set force update marker: {e}", flush=True)
+                    print("[CONSOLE] Server marked to update Palworld on next boot. Shutting down gracefully...", flush=True)
+                    manager_wrapper.shutdown()
+                    break
+                else:
+                    print("Usage: /update now", flush=True)
+                    
+            elif cmd.startswith("/"):
+                print(f"[CONSOLE] Unknown command: {cmd}", flush=True)
             else:
-                print("Usage: /update now", flush=True)
-                
-        elif cmd.startswith("/"):
-            print(f"[CONSOLE] Unknown command: {cmd}", flush=True)
-        else:
-            print("[CONSOLE] Ignoring non-slash command. Use /help for internal commands.", flush=True)
+                print("[CONSOLE] Ignoring non-slash command. Use /help for internal commands.", flush=True)
+    except (KeyboardInterrupt, EOFError):
+        pass
 
 
 if __name__ == "__main__":
@@ -742,6 +814,10 @@ if __name__ == "__main__":
     
     if wrapper.output_thread and wrapper.output_thread.is_alive():
         wrapper.output_thread.join(timeout=2)
+
+    if wrapper.shutdown_requested or wrapper._shutdown_executing:
+        print("[SHUTDOWN] Cleaning up and exiting. Shutdown complete.", flush=True)
+        sys.exit(0)
 
     print("[WATCHDOG] Upstream manager process exited.", flush=True)
     sys.exit(wrapper.process.returncode if wrapper.process else 0)
